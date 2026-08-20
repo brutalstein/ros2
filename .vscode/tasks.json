@@ -34,6 +34,25 @@
       "type": "shell",
       "command": "./dev rb",
       "problemMatcher": "$gcc"
+    },
+    {
+      "label": "ROS: Topics",
+      "type": "shell",
+      "command": "./ros topics",
+      "problemMatcher": []
+    },
+    {
+      "label": "ROS: Listen Topic",
+      "type": "shell",
+      "command": "./ros listen ${input:topic}",
+      "isBackground": true,
+      "problemMatcher": []
+    },
+    {
+      "label": "ROS: Doctor",
+      "type": "shell",
+      "command": "./ros doctor",
+      "problemMatcher": []
     }
   ],
   "inputs": [
@@ -41,6 +60,11 @@
       "id": "node",
       "type": "promptString",
       "description": "Node name, e.g. core or imu"
+    },
+    {
+      "id": "topic",
+      "type": "promptString",
+      "description": "Topic name, e.g. /drone/status"
     }
   ]
 }

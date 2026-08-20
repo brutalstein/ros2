@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROS_DISTRO="${ROS_DISTRO:-jazzy}"
+ROS_SETUP="/opt/ros/${ROS_DISTRO}/setup.bash"
+
+if [[ ! -f "${ROS_SETUP}" ]]; then
+  echo "[FAIL] ROS 2 ${ROS_DISTRO} not found: ${ROS_SETUP}" >&2
+  exit 1
+fi
+
+source "${ROS_SETUP}"
+[[ -f "${ROOT}/install/setup.bash" ]] && source "${ROOT}/install/setup.bash"
+
+exec python3 "${ROOT}/tools/ros.py" "$@"
