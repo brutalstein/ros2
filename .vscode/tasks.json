@@ -4,12 +4,24 @@
     {
       "label": "Dev: Build",
       "type": "shell",
-      "command": "./dev build",
+      "command": "./dev b",
       "group": {
         "kind": "build",
         "isDefault": true
       },
       "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Dev: Run Node",
+      "type": "shell",
+      "command": "./dev r ${input:node}",
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Dev: Check",
+      "type": "shell",
+      "command": "./dev check",
+      "problemMatcher": []
     },
     {
       "label": "Dev: Doctor",
@@ -18,10 +30,17 @@
       "problemMatcher": []
     },
     {
-      "label": "Dev: Clean",
+      "label": "Dev: Rebuild",
       "type": "shell",
-      "command": "./dev clean",
-      "problemMatcher": []
+      "command": "./dev rb",
+      "problemMatcher": "$gcc"
+    }
+  ],
+  "inputs": [
+    {
+      "id": "node",
+      "type": "promptString",
+      "description": "Node name, e.g. core or imu"
     }
   ]
 }

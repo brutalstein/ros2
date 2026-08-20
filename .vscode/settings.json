@@ -4,13 +4,20 @@
   "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
   "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
   "C_Cpp.default.includePath": [
-    "${workspaceFolder}/app/include",
+    "${workspaceFolder}/app/**",
     "/opt/ros/jazzy/include/**",
     "/usr/include/**"
   ],
+  "C_Cpp.default.browse.path": [
+    "${workspaceFolder}/app",
+    "/opt/ros/jazzy/include",
+    "/usr/include"
+  ],
   "cmake.configureOnOpen": false,
+  "cmake.sourceDirectory": "${workspaceFolder}/app",
   "ros.distro": "jazzy",
   "files.associations": {
+    "*.h": "cpp",
     "*.hpp": "cpp"
   }
 }

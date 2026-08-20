@@ -1,53 +1,66 @@
 # ros2
 
-Minimal ROS 2 Jazzy workspace for WSL development. The repository intentionally keeps one ROS package and one developer command.
+Minimal ROS 2 Jazzy C++ workspace for WSL drone development.
 
-## First use
+The actual drone project stays under `app/`. C++ files may be grouped however you want:
+
+```text
+app/
+├── core/
+│   └── core.cpp
+├── constants/
+│   └── topics.hpp
+├── sensors/
+├── control/
+├── planning/
+├── CMakeLists.txt
+└── package.xml
+```
+
+No `src/` or `include/` convention is required in this learning project.
+
+## One-time setup
+
+From the repository root:
 
 ```bash
-git clone https://github.com/brutalstein/ros2.git
-cd ros2
 ./dev setup
 code .
 ```
 
-`setup` checks the ROS toolchain, installs missing helper packages when needed, initializes rosdep, installs the recommended VS Code extensions, builds the workspace, and generates IntelliSense data.
-
-## Daily commands
+## Daily use
 
 ```bash
-./dev n status        # create app/src/status.cpp and build
-./dev h topics        # create app/include/drone/topics.hpp
-./dev b               # build + refresh VS Code IntelliSense
-./dev r status        # build + run node
-./dev d sensor_msgs   # add a ROS dependency
-./dev doctor          # check ROS, Gazebo, compiler, VS Code, NVIDIA
-./dev clean           # clean generated build files
+./dev b                    # incremental build + refresh VS Code
+./dev r core               # build and run core
+./dev ls                   # list detected nodes
+./dev n sensors/imu        # create app/sensors/imu.cpp
+./dev h constants/topics   # create app/constants/topics.hpp
+./dev d sensor_msgs        # add/install a ROS dependency
+./dev check                # quick automation/project validation
+./dev doctor               # WSL + ROS + Gazebo + GPU checks
+./dev fmt                  # clang-format C/C++ files
+./dev rb                   # clean rebuild
+./dev clean                # remove generated build files
 ```
 
-Long command names also work: `node`, `header`, `build`, `run`, `dep`, `setup`.
+Always run `./dev ...` from the repository root (`~/ros2`).
 
-## Structure
+## Automatic behavior
 
-```text
-ros2/
-├── app/              # the single ROS package
-│   ├── CMakeLists.txt
-│   └── package.xml
-├── tools/            # development automation
-├── .vscode/          # shared WSL/IntelliSense setup
-└── dev               # the only command you normally need
-```
+- C++ can live anywhere under `app/`.
+- A `.cpp/.cc/.cxx` file containing `int main(...)` is automatically a ROS executable.
+- Its executable name is its filename: `app/core/core.cpp` -> `core`.
+- A C++ source without `main()` is treated as shared implementation code and linked to the nodes.
+- Header files need no CMake edits; include from the app root, e.g. `#include "constants/topics.hpp"`.
+- Node filenames must be unique across `app/`; duplicates fail early with a clear error.
+- Installed ROS packages referenced by `#include` are synchronized into `package.xml` when detected.
+- `rosdep` resolves declared dependencies.
+- Build is incremental through CMake/colcon; unchanged files are not unnecessarily recompiled.
+- `compile_commands.json` is refreshed after a successful build so VS Code C++ IntelliSense follows the real compiler configuration.
 
-`app/src/` and `app/include/drone/` are created when you add your first node/header, so the repository stays clean and has no empty folder tree.
+## VS Code
 
-## What is automatic?
+`Ctrl+Shift+B` runs `./dev b`.
 
-- Every `app/src/*.cpp` file becomes a ROS 2 executable named after the file. No `add_executable()` edits.
-- Headers under `app/include/drone/` require no CMake edits.
-- `./dev build` scans ROS-style `#include` paths and adds already-installed ROS package dependencies to `package.xml` when possible.
-- `ament_cmake_auto` reads dependencies from `package.xml`, so dependencies are not duplicated in CMake.
-- Every build refreshes the root `compile_commands.json`, which VS Code C/C++ IntelliSense uses.
-- Every `./dev` command sources ROS Jazzy automatically. You do not need to type `source /opt/ros/jazzy/setup.bash` for these commands.
-
-The actual drone architecture will be added gradually on top of this base.
+Use **Terminal -> Run Task** for Build, Run Node, Check, Doctor, and Rebuild.
