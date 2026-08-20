@@ -480,9 +480,14 @@ def setup():
 
 
 def shell():
-    if not (ROOT / "install" / "setup.bash").exists():
+    setup = ROOT / "install" / "setup.bash"
+    if not setup.exists():
         build()
-    os.execvp("bash", ["bash"])
+
+    os.execvp(
+        "bash",
+        ["bash", "-lc", f'source "{setup}" && exec bash'],
+    )
 
 
 def help_text():

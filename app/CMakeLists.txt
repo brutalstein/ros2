@@ -19,7 +19,9 @@ file(GLOB_RECURSE DRONE_CPP
 
 # We inspect source contents to separate ROS executables from shared implementation.
 # Reconfigure when a source changes so adding/removing main() is detected.
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${DRONE_CPP})
+if(DRONE_CPP)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${DRONE_CPP})
+endif()
 
 set(DRONE_NODE_SOURCES)
 set(DRONE_LIBRARY_SOURCES)
