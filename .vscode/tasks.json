@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev: Build",
+      "type": "shell",
+      "command": "./dev build",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Dev: Doctor",
+      "type": "shell",
+      "command": "./dev doctor",
+      "problemMatcher": []
+    },
+    {
+      "label": "Dev: Clean",
+      "type": "shell",
+      "command": "./dev clean",
+      "problemMatcher": []
+    }
+  ]
+}
