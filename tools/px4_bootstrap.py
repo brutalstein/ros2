@@ -7,14 +7,15 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+import workspace_layout as layout
+
+ROOT = layout.ROOT
 APP = ROOT / "app"
-VENDOR_ROOT = ROOT / "vendor"
+VENDOR_ROOT = layout.VENDOR_DIR
 PX4_MSGS_DIR = VENDOR_ROOT / "px4_msgs"
-CACHE_DIR = ROOT / ".cache"
+CACHE_DIR = layout.CACHE_DIR
 STAMP_FILE = CACHE_DIR / "px4_msgs.json"
 PX4_AUTOPILOT_DIR = Path(
     os.environ.get("PX4_AUTOPILOT_DIR", str(Path.home() / "PX4-Autopilot"))
@@ -32,11 +33,7 @@ def die(message):
 
 
 def run(command, *, cwd=ROOT, capture=False, check=True):
-    kwargs = {
-        "cwd": cwd,
-        "check": check,
-        "text": True,
-    }
+    kwargs = {"cwd": cwd, "check": check, "text": True}
     if capture:
         kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     else:
@@ -90,9 +87,12 @@ def detect_px4_msgs_ref():
     if not px4_checkout_exists():
         return None, None
 
+    # px4_msgs is versioned by PX4 release line. For example PX4 v1.17.x
+    # should use px4_msgs release/1.17 rather than assuming an identical tag.
     exact_tag = git_output("describe", "--tags", "--exact-match", "HEAD", cwd=PX4_AUTOPILOT_DIR)
-    if re.fullmatch(r"v\d+\.\d+\.\d+(?:[-+].*)?", exact_tag):
-        return exact_tag, "PX4 exact tag"
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.\d+(?:[-+].*)?", exact_tag)
+    if match:
+        return f"release/{match.group(1)}.{match.group(2)}", f"PX4 {exact_tag}"
 
     description = git_output("describe", "--tags", "--always", "HEAD", cwd=PX4_AUTOPILOT_DIR)
     match = re.search(r"v?(\d+)\.(\d+)", description)
@@ -113,18 +113,12 @@ def current_vendor_identity():
     if not (PX4_MSGS_DIR / ".git").exists():
         return None
 
-    head = git_output("rev-parse", "HEAD", cwd=PX4_MSGS_DIR)
-    exact_tag = git_output("describe", "--tags", "--exact-match", "HEAD", cwd=PX4_MSGS_DIR)
-    branch = git_output("branch", "--show-current", cwd=PX4_MSGS_DIR)
-    remote = git_output("remote", "get-url", "origin", cwd=PX4_MSGS_DIR)
-    dirty = bool(git_output("status", "--porcelain", cwd=PX4_MSGS_DIR))
-
     return {
-        "head": head,
-        "tag": exact_tag,
-        "branch": branch,
-        "remote": remote,
-        "dirty": dirty,
+        "head": git_output("rev-parse", "HEAD", cwd=PX4_MSGS_DIR),
+        "tag": git_output("describe", "--tags", "--exact-match", "HEAD", cwd=PX4_MSGS_DIR),
+        "branch": git_output("branch", "--show-current", cwd=PX4_MSGS_DIR),
+        "remote": git_output("remote", "get-url", "origin", cwd=PX4_MSGS_DIR),
+        "dirty": bool(git_output("status", "--porcelain", cwd=PX4_MSGS_DIR)),
     }
 
 
@@ -137,6 +131,8 @@ def vendor_matches_ref(identity, expected_ref):
 
 
 def ensure_vendor(expected_ref):
+    layout.ensure()
+
     if not command_exists("git"):
         die("git is required for PX4 interface setup")
 
@@ -156,19 +152,19 @@ def ensure_vendor(expected_ref):
     if identity is None:
         die(
             f"{PX4_MSGS_DIR.relative_to(ROOT)} exists but is not a git checkout. "
-            "Move or remove it before continuing."
+            "Automation will not overwrite it."
         )
 
     if normalize_remote(identity["remote"]) != normalize_remote(PX4_MSGS_REPO):
         die(
-            "vendor/px4_msgs points to an unexpected remote. "
+            f"{PX4_MSGS_DIR.relative_to(ROOT)} points to an unexpected remote. "
             "Automation will not overwrite an unknown repository."
         )
 
     if identity["dirty"]:
         die(
-            "vendor/px4_msgs has local changes. "
-            "Automation refuses to modify or build a dirty interface checkout."
+            f"{PX4_MSGS_DIR.relative_to(ROOT)} has local changes. "
+            "Automation refuses to modify a dirty interface checkout."
         )
 
     if vendor_matches_ref(identity, expected_ref):
@@ -197,7 +193,7 @@ def load_stamp():
 
 
 def install_marker():
-    return ROOT / "install" / "px4_msgs" / "share" / "px4_msgs" / "package.sh"
+    return layout.INSTALL_DIR / "px4_msgs" / "share" / "px4_msgs" / "package.sh"
 
 
 def build_needed(expected_ref, force=False):
@@ -208,13 +204,12 @@ def build_needed(expected_ref, force=False):
     if identity is None:
         return True
 
-    stamp = load_stamp()
     expected = {
         "ros_distro": ROS_DISTRO,
         "ref": expected_ref,
         "head": identity["head"],
     }
-    return stamp != expected
+    return load_stamp() != expected
 
 
 def write_stamp(expected_ref):
@@ -234,6 +229,8 @@ def write_stamp(expected_ref):
 
 
 def build_px4_msgs(expected_ref, force=False):
+    layout.ensure()
+
     if not command_exists("colcon"):
         die("colcon is required. Run ./dev setup first")
 
@@ -253,15 +250,19 @@ def build_px4_msgs(expected_ref, force=False):
             ])
 
     run([
-        "colcon", "build",
+        "colcon",
+        "--log-base", str(layout.LOG_DIR),
+        "build",
         "--base-paths", str(PX4_MSGS_DIR),
+        "--build-base", str(layout.BUILD_DIR),
+        "--install-base", str(layout.INSTALL_DIR),
         "--packages-select", "px4_msgs",
         "--symlink-install",
         "--event-handlers", "console_direct+",
     ])
 
     if not install_marker().exists():
-        die("px4_msgs build completed but install marker is missing")
+        die("px4_msgs build completed but its install marker is missing")
 
     write_stamp(expected_ref)
     say(f"[OK] px4_msgs built: {expected_ref}")
@@ -285,11 +286,11 @@ def print_status(expected_ref=None, source=None):
 
     if identity:
         label = identity["tag"] or identity["branch"] or identity["head"][:12]
-        say(f"[OK] vendor/px4_msgs: {label}")
+        say(f"[OK] {PX4_MSGS_DIR.relative_to(ROOT)}: {label}")
     else:
-        say("[--] vendor/px4_msgs not present")
+        say(f"[--] {PX4_MSGS_DIR.relative_to(ROOT)} not present")
 
-    say(f"[{'OK' if install_marker().exists() else '--'}] px4_msgs installed in workspace")
+    say(f"[{'OK' if install_marker().exists() else '--'}] px4_msgs installed in managed workspace")
 
 
 def ensure(*, auto=False, force=False):
