@@ -4,6 +4,9 @@ set -eo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROS_DISTRO="${ROS_DISTRO:-jazzy}"
 ROS_SETUP="/opt/ros/${ROS_DISTRO}/setup.bash"
+COMMAND="${1:-help}"
+DEV_ENTRY="${ROOT}/tools/dev_entry.py"
+PX4_BOOTSTRAP="${ROOT}/tools/px4_bootstrap.py"
 
 if [[ ! -f "${ROS_SETUP}" ]]; then
   echo "ROS 2 ${ROS_DISTRO} not found: ${ROS_SETUP}" >&2
@@ -13,4 +16,28 @@ fi
 source "${ROS_SETUP}"
 [[ -f "${ROOT}/install/setup.bash" ]] && source "${ROOT}/install/setup.bash"
 
-exec python3 "${ROOT}/tools/dev.py" "$@"
+bootstrap_px4() {
+  python3 "${PX4_BOOTSTRAP}" --auto
+  [[ -f "${ROOT}/install/setup.bash" ]] && source "${ROOT}/install/setup.bash"
+}
+
+case "${COMMAND}" in
+  b|build|r|run|shell)
+    bootstrap_px4
+    ;;
+
+  rb|rebuild)
+    python3 "${DEV_ENTRY}" clean
+    python3 "${PX4_BOOTSTRAP}" --auto --force
+    [[ -f "${ROOT}/install/setup.bash" ]] && source "${ROOT}/install/setup.bash"
+    exec python3 "${DEV_ENTRY}" build
+    ;;
+
+  px4)
+    python3 "${PX4_BOOTSTRAP}"
+    [[ -f "${ROOT}/install/setup.bash" ]] && source "${ROOT}/install/setup.bash"
+    exec python3 "${PX4_BOOTSTRAP}" --status
+    ;;
+esac
+
+exec python3 "${DEV_ENTRY}" "$@"

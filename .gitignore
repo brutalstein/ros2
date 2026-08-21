@@ -4,5 +4,6 @@ log/
 compile_commands.json
 .cache/
 .vscode/ipch/
+vendor/px4_msgs/
 *.swp
 *~

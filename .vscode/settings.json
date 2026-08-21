@@ -5,11 +5,15 @@
   "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
   "C_Cpp.default.includePath": [
     "${workspaceFolder}/app/**",
+    "${workspaceFolder}/install/px4_msgs/include/**",
+    "${workspaceFolder}/vendor/px4_msgs/**",
     "/opt/ros/jazzy/include/**",
     "/usr/include/**"
   ],
   "C_Cpp.default.browse.path": [
     "${workspaceFolder}/app",
+    "${workspaceFolder}/install/px4_msgs/include",
+    "${workspaceFolder}/vendor/px4_msgs",
     "/opt/ros/jazzy/include",
     "/usr/include"
   ],
