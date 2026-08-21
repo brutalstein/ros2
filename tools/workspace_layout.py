@@ -40,30 +40,36 @@ def _remove_generated(path: Path):
         shutil.rmtree(path)
 
 
-def _move_vendor_safely():
-    if not LEGACY_VENDOR.exists():
+def _move_directory_safely(source: Path, target: Path, label: str):
+    if not source.exists():
         return False
 
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
-    if VENDOR_DIR.exists():
-        legacy_items = list(LEGACY_VENDOR.iterdir()) if LEGACY_VENDOR.is_dir() else []
-        target_items = list(VENDOR_DIR.iterdir()) if VENDOR_DIR.is_dir() else []
+    if not source.is_dir():
+        die(f"legacy {source.name} exists but is not a directory")
 
-        if legacy_items and target_items:
+    if target.exists():
+        if not target.is_dir():
+            die(f"managed target {target.relative_to(ROOT)} is not a directory")
+
+        source_items = list(source.iterdir())
+        target_items = list(target.iterdir())
+
+        if source_items and target_items:
             die(
-                "both vendor/ and .workspace/vendor/ contain data. "
+                f"both {source.relative_to(ROOT)}/ and {target.relative_to(ROOT)}/ contain data. "
                 "Automation refuses to merge them automatically."
             )
 
         if not target_items:
-            _remove_generated(VENDOR_DIR)
-        elif not legacy_items:
-            _remove_generated(LEGACY_VENDOR)
+            target.rmdir()
+        elif not source_items:
+            source.rmdir()
             return True
 
-    shutil.move(str(LEGACY_VENDOR), str(VENDOR_DIR))
-    say("[OK] migrated vendor/ -> .workspace/vendor/")
+    shutil.move(str(source), str(target))
+    say(f"[OK] migrated {source.relative_to(ROOT)}/ -> {target.relative_to(ROOT)}/")
     return True
 
 
@@ -72,14 +78,14 @@ def migrate():
     changed = False
     STATE_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Vendor sources may be expensive to download and may contain useful git state,
-    # so preserve them by moving the directory rather than deleting it.
-    changed |= _move_vendor_safely()
+    # Preserve non-generated state. These directories can contain fetched source,
+    # version metadata, or user-inspected files, so never delete them implicitly.
+    changed |= _move_directory_safely(LEGACY_VENDOR, VENDOR_DIR, "vendor")
+    changed |= _move_directory_safely(LEGACY_CACHE, CACHE_DIR, "cache")
 
-    # These paths are reproducible build/cache artifacts. Moving them is unsafe
-    # because generated setup files can embed their old absolute prefixes, so a
-    # clean rebuild is the deterministic migration strategy.
-    for path in (LEGACY_BUILD, LEGACY_INSTALL, LEGACY_LOG, LEGACY_CACHE):
+    # Build/install/log contain absolute paths and are reproducible. Reusing them
+    # after a prefix move is less safe than rebuilding deterministically.
+    for path in (LEGACY_BUILD, LEGACY_INSTALL, LEGACY_LOG):
         if path.exists() or path.is_symlink():
             _remove_generated(path)
             say(f"[OK] removed legacy generated path: {path.name}/")
