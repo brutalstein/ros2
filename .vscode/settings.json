@@ -2,24 +2,30 @@
   "C_Cpp.default.compilerPath": "/usr/bin/g++",
   "C_Cpp.default.cppStandard": "c++17",
   "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
-  "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/.workspace/compile_commands.json",
   "C_Cpp.default.includePath": [
     "${workspaceFolder}/app/**",
-    "${workspaceFolder}/install/px4_msgs/include/**",
-    "${workspaceFolder}/vendor/px4_msgs/**",
+    "${workspaceFolder}/.workspace/install/px4_msgs/include/**",
+    "${workspaceFolder}/.workspace/vendor/px4_msgs/**",
     "/opt/ros/jazzy/include/**",
     "/usr/include/**"
   ],
   "C_Cpp.default.browse.path": [
     "${workspaceFolder}/app",
-    "${workspaceFolder}/install/px4_msgs/include",
-    "${workspaceFolder}/vendor/px4_msgs",
+    "${workspaceFolder}/.workspace/install/px4_msgs/include",
+    "${workspaceFolder}/.workspace/vendor/px4_msgs",
     "/opt/ros/jazzy/include",
     "/usr/include"
   ],
   "cmake.configureOnOpen": false,
   "cmake.sourceDirectory": "${workspaceFolder}/app",
   "ros.distro": "jazzy",
+  "files.exclude": {
+    "**/.workspace": true
+  },
+  "search.exclude": {
+    "**/.workspace": true
+  },
   "files.associations": {
     "*.h": "cpp",
     "*.hpp": "cpp"
