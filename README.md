@@ -11,64 +11,97 @@
 ![C++](https://img.shields.io/badge/C++-17-00599C?logo=cplusplus&logoColor=white)
 ![WSL](https://img.shields.io/badge/WSL2-ready-0078D4?logo=windows&logoColor=white)
 
-**Two commands. One workflow.**
+**One initialization. Two commands. Clean repository.**
 
 </div>
 
 ```mermaid
 flowchart LR
-    YOU[You] --> DEV[./dev]
-    YOU --> ROS[./ros]
-    DEV --> BUILD[Build · Files · PX4 interfaces]
+    INIT[./dev init workspace] --> READY[Workspace Ready]
+    READY --> DEV[./dev]
+    READY --> ROS[./ros]
+    DEV --> BUILD[Create · Build · PX4 Interfaces]
     ROS --> GRAPH[Run · Listen · Inspect]
 ```
 
-## Quick start
+## First use
 
-Always work from the repository root:
+Open the repository root:
 
 ```bash
 cd ~/ros2
 ```
 
-One-time setup:
+Initialize everything with one command:
 
 ```bash
-./dev setup
+./dev init workspace
 ```
 
-Daily flow:
+This command is safe to run again. It checks or prepares the development toolchain, ROS dependencies, VS Code extensions, PX4 message interfaces, the first build, and compiler metadata used by IntelliSense.
+
+After initialization, normal development is simply:
 
 ```bash
 ./dev b
-./ros run core
-./ros listen /drone/status
 ```
 
-You do **not** need to manually source ROS or the workspace when using `./dev` or `./ros`.
+Whenever you add or edit a C++ source/header, run `./dev b`. CMake/colcon performs an incremental rebuild and refreshes VS Code's real compiler configuration automatically.
+
+---
+
+## Clean workspace layout
+
+Only project-facing files stay visible at repository root:
+
+```text
+ros2/
+├── app/
+├── tools/
+├── .vscode/
+├── dev
+├── ros
+└── README.md
+```
+
+Generated and external development state is isolated in the hidden `.workspace/` directory:
+
+```text
+.workspace/
+├── build/
+├── install/
+├── log/
+├── vendor/
+├── cache/
+└── compile_commands.json
+```
+
+VS Code hides `.workspace/` from Explorer and search while still using its generated compiler metadata and PX4 headers.
+
+Older root-level `build/`, `install/`, `log/`, `vendor/`, `.cache/`, and `compile_commands.json` layouts are migrated automatically. External vendor/cache data is preserved; reproducible build artifacts are regenerated instead of being moved with stale absolute paths.
 
 ---
 
 ## `./dev` — development console
 
-Use `./dev` for code, dependencies, builds, VS Code IntelliSense and PX4 ROS interfaces.
-
-| Command | What it does |
+| Command | Purpose |
 |---|---|
-| `./dev b` | Incremental build + refresh VS Code IntelliSense |
-| `./dev rb` | Clean rebuild, including required PX4 interfaces |
+| `./dev init workspace` | Initialize/migrate the workspace, prepare VS Code/PX4, perform first build |
+| `./dev b` | Incremental build + refresh IntelliSense |
+| `./dev rb` | Clean rebuild |
 | `./dev n sensors/imu` | Create `app/sensors/imu.cpp` |
 | `./dev h constants/topics` | Create `app/constants/topics.hpp` |
 | `./dev d sensor_msgs` | Add/install a ROS dependency |
 | `./dev r core` | Build and run a node |
 | `./dev ls` | List detected node executables |
-| `./dev px4` | Prepare and verify the PX4 ROS interface package |
-| `./dev check` | Validate project + automation |
+| `./dev px4` | Prepare/check version-matched PX4 ROS message interfaces |
+| `./dev check` | Validate project, scripts, node discovery and workspace layout |
 | `./dev doctor` | Check WSL, ROS, Gazebo, compiler, VS Code and GPU |
-| `./dev fmt` | Format C/C++ files |
-| `./dev clean` | Remove generated build files |
+| `./dev fmt` | Format project C/C++ files |
+| `./dev clean` | Remove generated build/install/log while preserving vendor state |
+| `./dev shell` | Open a workspace-ready ROS shell |
 
-### Typical code workflow
+### Normal coding flow
 
 ```bash
 ./dev n state/state
@@ -77,113 +110,64 @@ Use `./dev` for code, dependencies, builds, VS Code IntelliSense and PX4 ROS int
 ./dev r state
 ```
 
-Headers under `app/` need no manual CMake entry.
+Headers under `app/` need no manual CMake entry. A `.cpp` containing `int main(...)` becomes a node executable automatically, and newly created files are discovered on the next `./dev b`.
 
 ---
 
-## Automatic PX4 interface handling
+## PX4 interface automation
 
-`./dev b`, `./dev r ...` and `./dev rb` automatically prepare the ROS interface package used to access PX4 message types.
+`./dev init workspace`, `./dev b`, `./dev r ...` and `./dev rb` manage the ROS-side PX4 message interface automatically.
 
 ```mermaid
 flowchart LR
-    PX4[~/PX4-Autopilot] --> DETECT[Detect PX4 version]
-    DETECT --> MSGS[vendor/px4_msgs]
-    MSGS --> BUILD[colcon build]
-    BUILD --> CC[compile_commands.json]
-    CC --> VSCODE[VS Code IntelliSense]
+    PX4[~/PX4-Autopilot] --> VERSION[Detect release]
+    VERSION --> MSGS[.workspace/vendor/px4_msgs]
+    MSGS --> COLCON[colcon]
+    COLCON --> INSTALL[.workspace/install]
+    INSTALL --> CC[compile_commands.json]
+    CC --> VSCODE[VS Code]
 ```
 
-The automation:
+The automation detects the local PX4 release, selects the matching `px4_msgs` release line, refuses to overwrite dirty or unexpected vendor repositories, never modifies `~/PX4-Autopilot`, and only rebuilds the interface when necessary.
 
-- detects the local PX4 checkout from `~/PX4-Autopilot` by default;
-- matches `px4_msgs` to the detected PX4 release/tag;
-- stores the external source only under `vendor/px4_msgs`;
-- never edits the PX4 Autopilot checkout;
-- never uses `sudo` for PX4 interface setup;
-- refuses to overwrite a dirty or unexpected `vendor/px4_msgs` checkout;
-- builds the interface only when missing or version-changed;
-- exposes generated PX4 C++ headers to VS Code;
-- lets normal dependency discovery add `px4_msgs` when your code first includes it.
-
-Manual PX4 interface check:
-
-```bash
-./dev px4
-```
-
-If PX4 lives somewhere else:
-
-```bash
-PX4_AUTOPILOT_DIR=/path/to/PX4-Autopilot ./dev px4
-```
-
-After this, C++ includes such as:
+After that, normal C++ includes are resolved through the same workflow:
 
 ```cpp
 #include "px4_msgs/msg/vehicle_local_position.hpp"
 ```
 
-are resolved by the same `./dev b` workflow.
-
-> PX4 firmware/SITL itself remains a separate project and is still started from `~/PX4-Autopilot` with PX4's own build command. `./dev` manages the ROS-side interface, not the PX4 firmware build.
+PX4 firmware/SITL itself remains independent and continues to be started from the PX4 repository. `./dev` manages the ROS-side autonomy workspace and PX4 interfaces, not the PX4 firmware build.
 
 ---
 
-## `./ros` — ROS runtime console
-
-Use `./ros` when nodes are running and you want to inspect or interact with the ROS graph.
+## `./ros` — runtime console
 
 ### Topics
 
-| Command | What it does |
+| Command | Purpose |
 |---|---|
 | `./ros topics` | List topics with message types |
-| `./ros listen /drone/status` | Continuously print topic data |
-| `./ros once /drone/status` | Print one message and exit |
-| `./ros rate /drone/status` | Show topic frequency |
-| `./ros info /drone/status` | Show publishers, subscribers and QoS details |
+| `./ros listen /drone/status` | Continuously print a topic |
+| `./ros once /drone/status` | Read one message |
+| `./ros rate /drone/status` | Show message frequency |
+| `./ros info /drone/status` | Show publishers/subscribers/QoS |
 | `./ros send TOPIC TYPE DATA` | Publish one message |
 
-Example:
+### Nodes / services / parameters
 
-```bash
-./ros send /demo std_msgs/msg/String '{data: hello}'
-```
-
-### Nodes
-
-| Command | What it does |
+| Command | Purpose |
 |---|---|
 | `./ros nodes` | List running nodes |
-| `./ros node core` | Inspect a running node |
-| `./ros run core` | Run an already-built node without rebuilding |
-
-### Services
-
-| Command | What it does |
-|---|---|
-| `./ros services` | List services with types |
+| `./ros node core` | Inspect a node |
+| `./ros run core` | Run an already-built node |
+| `./ros services` | List services |
 | `./ros call SERVICE TYPE DATA` | Call a service |
-
-### Parameters
-
-| Command | What it does |
-|---|---|
-| `./ros params core` | List parameters on a node |
+| `./ros params core` | List node parameters |
 | `./ros get core PARAM` | Read a parameter |
 | `./ros set core PARAM VALUE` | Change a parameter |
+| `./ros doctor` | Check the ROS runtime environment |
 
-### System
-
-```bash
-./ros doctor
-./ros help
-```
-
----
-
-## Short aliases
+Short aliases:
 
 ```text
 ./ros t        -> topics
@@ -193,7 +177,6 @@ Example:
 ./ros n        -> nodes
 ./ros r NODE   -> run
 ./ros s        -> services
-./ros h        -> help
 ```
 
 ---
@@ -206,4 +189,4 @@ Example:
 ./dev b
 ```
 
-After a successful build, `compile_commands.json` is refreshed and VS Code receives the real compiler include paths, including generated PX4 message headers.
+The C++ extension reads `.workspace/compile_commands.json`, so project, ROS, and generated PX4 include paths come from the real build configuration instead of hand-maintained guesses.
