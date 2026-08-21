@@ -27,6 +27,10 @@ bootstrap_px4() {
 }
 
 case "${COMMAND}" in
+  setup)
+    exec python3 "${DEV_ENTRY}" init workspace
+    ;;
+
   b|build|r|run|shell)
     bootstrap_px4
     ;;
