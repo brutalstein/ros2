@@ -11,6 +11,7 @@ import dev as base
 import workspace_layout as layout
 
 PX4_MSGS = layout.VENDOR_DIR / "px4_msgs"
+PX4_BOOTSTRAP = base.ROOT / "tools" / "px4_bootstrap.py"
 
 
 def install_ros_deps():
@@ -78,8 +79,7 @@ def clean():
     if layout.COMPILE_COMMANDS.exists() or layout.COMPILE_COMMANDS.is_symlink():
         layout.COMPILE_COMMANDS.unlink()
 
-    # Keep vendor/ and cache/ intentionally. Vendor sources are external inputs,
-    # not disposable build products; cache contains version/layout metadata.
+    # External source and metadata are intentionally preserved.
     base.say("[OK] clean")
 
 
@@ -114,6 +114,69 @@ def shell():
     )
 
 
+def install_prerequisites():
+    needed = []
+    if not base.cmd_exists("colcon"):
+        needed.append("python3-colcon-common-extensions")
+    if not base.cmd_exists("rosdep"):
+        needed.append("python3-rosdep")
+    if not base.cmd_exists("cmake"):
+        needed.append("cmake")
+    if not base.cmd_exists("g++"):
+        needed.append("g++")
+
+    if needed:
+        base.apt_install(needed)
+
+    if not base.ros_package_exists("ament_cmake_auto"):
+        base.apt_install([f"ros-{base.ROS_DISTRO}-ament-cmake-auto"])
+
+    rosdep_sources = Path("/etc/ros/rosdep/sources.list.d/20-default.list")
+    if base.cmd_exists("rosdep"):
+        if not rosdep_sources.exists():
+            base.run(["sudo", "rosdep", "init"])
+        base.run(["rosdep", "update"])
+
+    if base.cmd_exists("code"):
+        for extension in (
+            "ms-vscode.cpptools",
+            "ms-vscode.cmake-tools",
+            "ms-iot.vscode-ros",
+        ):
+            base.run(["code", "--install-extension", extension, "--force"], check=False)
+
+
+def init_workspace():
+    """Idempotent first-run setup for this repository."""
+    layout.ensure()
+    base.say("[INFO] initializing managed workspace")
+
+    install_prerequisites()
+    base.check_project()
+
+    # Prepare PX4 message interfaces after the compiler/colcon prerequisites exist.
+    base.run([sys.executable, str(PX4_BOOTSTRAP), "--auto"])
+
+    # px4_msgs may have just been installed, so build the application in a fresh
+    # shell that sources the newly generated workspace environment.
+    setup = layout.INSTALL_DIR / "setup.bash"
+    ros_setup = Path(f"/opt/ros/{base.ROS_DISTRO}/setup.bash")
+    command = (
+        f'source "{ros_setup}" && '
+        + (f'source "{setup}" && ' if setup.exists() else "")
+        + f'exec python3 "{Path(__file__).resolve()}" build'
+    )
+    base.run(["bash", "-lc", command])
+
+    if not layout.COMPILE_COMMANDS.exists():
+        base.die("workspace initialized but compile_commands.json is missing")
+
+    layout.status()
+    base.say("[OK] workspace initialized")
+    base.say("[OK] VS Code C++/ROS/PX4 paths are ready")
+    base.say("Next: write code, then run ./dev b")
+
+
 def fast_check():
     layout.ensure()
     base.check_project()
@@ -122,7 +185,7 @@ def fast_check():
         Path(base.__file__).resolve(),
         Path(__file__).resolve(),
         Path(layout.__file__).resolve(),
-        base.ROOT / "tools" / "px4_bootstrap.py",
+        PX4_BOOTSTRAP,
         base.ROOT / "tools" / "ros.py",
     )
     for script in scripts:
@@ -141,8 +204,8 @@ def fast_check():
 
 def help_text():
     base.say('''Usage:
-  ./dev setup                 first-time setup
-  ./dev b | build             build everything
+  ./dev init workspace        one-command workspace initialization
+  ./dev b | build             incremental build + refresh IntelliSense
   ./dev rb | rebuild          clean + build
   ./dev r NODE [args...]      build + run a node
   ./dev n PATH                create node, e.g. sensors/imu
@@ -176,5 +239,17 @@ base.shell = shell
 base.fast_check = fast_check
 base.help_text = help_text
 
-if __name__ == "__main__":
+
+def main():
+    args = sys.argv[1:]
+    if args and args[0] == "init":
+        if args[1:] != ["workspace"]:
+            base.die("Usage: ./dev init workspace")
+        init_workspace()
+        return
+
     base.main()
+
+
+if __name__ == "__main__":
+    main()
