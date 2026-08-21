@@ -11,7 +11,7 @@
 ![C++](https://img.shields.io/badge/C++-17-00599C?logo=cplusplus&logoColor=white)
 ![WSL](https://img.shields.io/badge/WSL2-ready-0078D4?logo=windows&logoColor=white)
 
-**One initialization. Two commands. Clean repository.**
+**One initialization. Three focused consoles. Clean repository.**
 
 </div>
 
@@ -19,8 +19,10 @@
 flowchart LR
     INIT[./dev init workspace] --> READY[Workspace Ready]
     READY --> DEV[./dev]
+    READY --> DRONE[./drone]
     READY --> ROS[./ros]
     DEV --> BUILD[Create · Build · PX4 Interfaces]
+    DRONE --> SIM[DDS Agent · PX4 · Gazebo]
     ROS --> GRAPH[Run · Listen · Inspect]
 ```
 
@@ -40,13 +42,38 @@ Initialize everything with one command:
 
 This command is safe to run again. It checks or prepares the development toolchain, ROS dependencies, VS Code extensions, PX4 message interfaces, the first build, and compiler metadata used by IntelliSense.
 
-After initialization, normal development is simply:
+Normal development:
 
 ```bash
 ./dev b
 ```
 
-Whenever you add or edit a C++ source/header, run `./dev b`. CMake/colcon performs an incremental rebuild and refreshes VS Code's real compiler configuration automatically.
+Start the simulator runtime:
+
+```bash
+./drone start
+```
+
+Then use a separate terminal for your own ROS work:
+
+```bash
+./dev r state
+./ros topics
+```
+
+---
+
+## Architecture
+
+Each root command has one responsibility:
+
+```text
+./dev    development/build/dependencies/VS Code
+./drone  PX4 + Gazebo + DDS runtime orchestration
+./ros    ROS graph inspection and interaction
+```
+
+`./drone start` keeps the Micro XRCE-DDS Agent in the background and opens PX4 + Gazebo in a separate WSL/Windows terminal. Your ROS terminal remains yours.
 
 ---
 
@@ -60,11 +87,12 @@ ros2/
 ├── tools/
 ├── .vscode/
 ├── dev
+├── drone
 ├── ros
 └── README.md
 ```
 
-Generated and external development state is isolated in the hidden `.workspace/` directory:
+Generated, external, and runtime state is isolated in `.workspace/`:
 
 ```text
 .workspace/
@@ -73,12 +101,69 @@ Generated and external development state is isolated in the hidden `.workspace/`
 ├── log/
 ├── vendor/
 ├── cache/
+├── runtime/
 └── compile_commands.json
 ```
 
-VS Code hides `.workspace/` from Explorer and search while still using its generated compiler metadata and PX4 headers.
+`.workspace/runtime/` contains only runtime metadata such as process identities and the background DDS Agent log. VS Code hides `.workspace/` from Explorer/search while still using its generated compiler metadata and PX4 headers.
 
 Older root-level `build/`, `install/`, `log/`, `vendor/`, `.cache/`, and `compile_commands.json` layouts are migrated automatically. External vendor/cache data is preserved; reproducible build artifacts are regenerated instead of being moved with stale absolute paths.
+
+---
+
+## `./drone` — simulation runtime console
+
+The normal command is:
+
+```bash
+./drone start
+```
+
+It performs a guarded startup sequence:
+
+```text
+validate WSL/PX4
+      ↓
+find or start MicroXRCEAgent
+      ↓
+verify UDP 8888 is actually bound
+      ↓
+prevent duplicate PX4 instances
+      ↓
+open a new WSL terminal
+      ↓
+make px4_sitl gz_x500
+      ↓
+PX4 + Gazebo ready for ROS
+```
+
+| Command | Purpose |
+|---|---|
+| `./drone start` | Start/reuse DDS Agent in background and open PX4 + Gazebo in a new terminal |
+| `./drone status` | Show Agent, UDP port, PX4 and Gazebo state |
+| `./drone stop` | Gracefully stop processes owned by this runtime console |
+| `./drone logs` | Show recent background DDS Agent logs |
+| `./drone logs -f` | Follow DDS Agent logs live |
+| `./drone doctor` | Validate WSL, PX4 checkout, Agent binary, port and Windows terminal launcher |
+
+Safety behavior:
+
+- repeated `./drone start` calls are idempotent and do not intentionally launch duplicate Agent/PX4 instances;
+- an existing compatible MicroXRCEAgent is reused instead of killed;
+- if UDP 8888 belongs to an unknown process, startup fails instead of taking it over;
+- process state stores both PID and Linux process start identity to reduce PID-reuse mistakes;
+- `./drone stop` does not kill external processes it did not start;
+- if PX4 window creation fails after this invocation started the Agent, that Agent is rolled back;
+- background logs live under `.workspace/runtime/logs/`.
+
+Defaults can be overridden without changing source:
+
+```text
+PX4_AUTOPILOT_DIR     default: ~/PX4-Autopilot
+PX4_SIM_TARGET        default: gz_x500
+XRCE_DDS_PORT         default: 8888
+MICRO_XRCE_AGENT_BIN  explicit Agent executable path
+```
 
 ---
 
@@ -95,10 +180,10 @@ Older root-level `build/`, `install/`, `log/`, `vendor/`, `.cache/`, and `compil
 | `./dev r core` | Build and run a node |
 | `./dev ls` | List detected node executables |
 | `./dev px4` | Prepare/check version-matched PX4 ROS message interfaces |
-| `./dev check` | Validate project, scripts, node discovery and workspace layout |
+| `./dev check` | Validate project scripts, node discovery and workspace layout |
 | `./dev doctor` | Check WSL, ROS, Gazebo, compiler, VS Code and GPU |
 | `./dev fmt` | Format project C/C++ files |
-| `./dev clean` | Remove generated build/install/log while preserving vendor state |
+| `./dev clean` | Remove generated build/install/log while preserving vendor/runtime state |
 | `./dev shell` | Open a workspace-ready ROS shell |
 
 ### Normal coding flow
@@ -136,11 +221,11 @@ After that, normal C++ includes are resolved through the same workflow:
 #include "px4_msgs/msg/vehicle_local_position.hpp"
 ```
 
-PX4 firmware/SITL itself remains independent and continues to be started from the PX4 repository. `./dev` manages the ROS-side autonomy workspace and PX4 interfaces, not the PX4 firmware build.
+`./dev` manages the ROS-side interface/build environment. `./drone` manages the simulator runtime. PX4's low-level control stack itself remains inside the PX4 checkout.
 
 ---
 
-## `./ros` — runtime console
+## `./ros` — ROS runtime console
 
 ### Topics
 
@@ -188,5 +273,7 @@ Short aliases:
 ```bash
 ./dev b
 ```
+
+The task palette also includes `Drone: Start Runtime`, `Drone: Status`, and `Drone: Stop Runtime`.
 
 The C++ extension reads `.workspace/compile_commands.json`, so project, ROS, and generated PX4 include paths come from the real build configuration instead of hand-maintained guesses.
