@@ -42,6 +42,24 @@
       "problemMatcher": "$gcc"
     },
     {
+      "label": "Drone: Start Runtime",
+      "type": "shell",
+      "command": "./drone start",
+      "problemMatcher": []
+    },
+    {
+      "label": "Drone: Status",
+      "type": "shell",
+      "command": "./drone status",
+      "problemMatcher": []
+    },
+    {
+      "label": "Drone: Stop Runtime",
+      "type": "shell",
+      "command": "./drone stop",
+      "problemMatcher": []
+    },
+    {
       "label": "ROS: Topics",
       "type": "shell",
       "command": "./ros topics",
