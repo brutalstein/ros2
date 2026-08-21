@@ -6,8 +6,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+import workspace_layout as layout
+
+ROOT = layout.ROOT
 PACKAGE = "drone"
+WORKSPACE_SETUP = layout.INSTALL_DIR / "setup.bash"
 
 
 def say(message=""):
@@ -98,8 +101,8 @@ def require_service(name):
 
 
 def require_workspace():
-    if not (ROOT / "install" / "setup.bash").exists():
-        die("workspace is not built yet. Run: ./dev b")
+    if not WORKSPACE_SETUP.exists():
+        die("workspace is not built yet. Run: ./dev init workspace")
 
 
 def topic_list():
@@ -197,10 +200,12 @@ def param_set(node, param, value):
 
 
 def doctor():
+    layout.ensure()
     checks = [
         ("ROS_DISTRO", os.environ.get("ROS_DISTRO", "(unset)")),
         ("ROS_DOMAIN_ID", os.environ.get("ROS_DOMAIN_ID", "0")),
-        ("workspace", "built" if (ROOT / "install" / "setup.bash").exists() else "not built"),
+        ("workspace", "built" if WORKSPACE_SETUP.exists() else "not built"),
+        ("workspace_path", str(layout.STATE_DIR.relative_to(ROOT))),
     ]
     for key, value in checks:
         say(f"[OK] {key}={value}")
