@@ -13,9 +13,10 @@ INSTALL_DIR = STATE_DIR / "install"
 LOG_DIR = STATE_DIR / "log"
 VENDOR_DIR = STATE_DIR / "vendor"
 CACHE_DIR = STATE_DIR / "cache"
+RUNTIME_DIR = STATE_DIR / "runtime"
 COMPILE_COMMANDS = STATE_DIR / "compile_commands.json"
 STAMP_FILE = CACHE_DIR / "layout.json"
-LAYOUT_VERSION = 2
+LAYOUT_VERSION = 3
 
 LEGACY_BUILD = ROOT / "build"
 LEGACY_INSTALL = ROOT / "install"
@@ -108,7 +109,7 @@ def migrate():
 
 def ensure():
     migrate()
-    for path in (BUILD_DIR, INSTALL_DIR, LOG_DIR, VENDOR_DIR, CACHE_DIR):
+    for path in (BUILD_DIR, INSTALL_DIR, LOG_DIR, VENDOR_DIR, CACHE_DIR, RUNTIME_DIR):
         path.mkdir(parents=True, exist_ok=True)
 
 
@@ -119,6 +120,7 @@ def status():
     say(f"log={LOG_DIR.relative_to(ROOT)}/")
     say(f"vendor={VENDOR_DIR.relative_to(ROOT)}/")
     say(f"cache={CACHE_DIR.relative_to(ROOT)}/")
+    say(f"runtime={RUNTIME_DIR.relative_to(ROOT)}/")
     say(f"compile_commands={COMPILE_COMMANDS.relative_to(ROOT)}")
 
     legacy = [
