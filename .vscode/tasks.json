@@ -2,6 +2,12 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Dev: Init Workspace",
+      "type": "shell",
+      "command": "./dev init workspace",
+      "problemMatcher": []
+    },
+    {
       "label": "Dev: Build",
       "type": "shell",
       "command": "./dev b",
