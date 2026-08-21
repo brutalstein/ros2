@@ -1,9 +1,13 @@
+.workspace/
+
+# Legacy generated paths kept ignored for migration safety.
 build/
 install/
 log/
 compile_commands.json
 .cache/
+vendor/
+
 .vscode/ipch/
-vendor/px4_msgs/
 *.swp
 *~
