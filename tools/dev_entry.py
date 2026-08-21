@@ -187,6 +187,7 @@ def fast_check():
         Path(layout.__file__).resolve(),
         PX4_BOOTSTRAP,
         base.ROOT / "tools" / "ros.py",
+        base.ROOT / "tools" / "drone.py",
     )
     for script in scripts:
         result = subprocess.run([sys.executable, "-m", "py_compile", str(script)])
