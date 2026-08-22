@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "profile": "wsl2-ubuntu-24.04-x86_64",
+  "support": {
+    "os_id": "ubuntu",
+    "os_versions": ["24.04"],
+    "architectures": ["x86_64", "amd64"],
+    "wsl2": "preferred",
+    "native_ubuntu": true
+  },
+  "stack": {
+    "ros": {
+      "distro": "jazzy",
+      "apt_source_version": "1.2.0",
+      "apt_packages": ["ros-jazzy-ros-base", "ros-dev-tools"]
+    },
+    "px4": {
+      "repo": "https://github.com/PX4/PX4-Autopilot.git",
+      "ref": "v1.17.0",
+      "messages_ref": "release/1.17",
+      "sim_target": "gz_x500"
+    },
+    "px4_msgs": {
+      "repo": "https://github.com/PX4/px4_msgs.git",
+      "ref": "release/1.17"
+    },
+    "micro_xrce_dds_agent": {
+      "repo": "https://github.com/eProsima/Micro-XRCE-DDS-Agent.git",
+      "ref": "v2.4.3",
+      "port": 8888
+    },
+    "gazebo": {
+      "family": "Harmonic",
+      "expected_major": 8
+    }
+  },
+  "vscode": {
+    "extensions": [
+      "ms-vscode.cpptools",
+      "ms-vscode.cmake-tools",
+      "ms-iot.vscode-ros",
+      "ms-vscode-remote.remote-wsl"
+    ]
+  }
+}
