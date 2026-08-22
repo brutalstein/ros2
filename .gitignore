@@ -1,6 +1,6 @@
 .workspace/
 
-# Legacy generated paths kept ignored for migration safety.
+# Legacy generated paths kept ignored for safe migration/old clones.
 build/
 install/
 log/
@@ -8,6 +8,9 @@ compile_commands.json
 .cache/
 vendor/
 
+# Python/editor noise.
+**/__pycache__/
+*.py[cod]
 .vscode/ipch/
 *.swp
 *~
