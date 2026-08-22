@@ -2,278 +2,105 @@
 
 # DRONE DEV CONSOLE
 
-**ROS 2 Jazzy · PX4 v1.17 · Gazebo Harmonic · C++ · WSL2**
+**WSL2 / Ubuntu 24.04 · ROS 2 Jazzy · PX4 v1.17 · Gazebo Harmonic · C++17 · VS Code**
 
-![ROS 2](https://img.shields.io/badge/ROS_2-Jazzy-22314E?logo=ros&logoColor=white)
-![PX4](https://img.shields.io/badge/PX4-v1.17-111111)
-![Ubuntu](https://img.shields.io/badge/Ubuntu-24.04-E95420?logo=ubuntu&logoColor=white)
-![Gazebo](https://img.shields.io/badge/Gazebo-8.x-F58113)
-![C++](https://img.shields.io/badge/C++-17-00599C?logo=cplusplus&logoColor=white)
-![WSL](https://img.shields.io/badge/WSL2-ready-0078D4?logo=windows&logoColor=white)
-
-**One initialization. Three focused consoles. Clean repository.**
+Clone, run one setup command, then build or simulate.
 
 </div>
 
-```mermaid
-flowchart LR
-    INIT[./dev init workspace] --> READY[Workspace Ready]
-    READY --> DEV[./dev]
-    READY --> DRONE[./drone]
-    READY --> ROS[./ros]
-    DEV --> BUILD[Create · Build · PX4 Interfaces]
-    DRONE --> SIM[DDS Agent · PX4 · Gazebo]
-    ROS --> GRAPH[Run · Listen · Inspect]
-```
-
 ## First use
 
-Open the repository root:
+Open the repository from VS Code in WSL, then:
 
 ```bash
-cd ~/ros2
+cd /path/to/ros2
+./dev setup
 ```
 
-Initialize everything with one command:
+`./dev setup` is an idempotent machine bootstrap. It detects the OS, WSL generation, architecture, CPU count, RAM, GPU visibility, repository location and available VS Code integration before changing anything. It then resolves the pinned compatibility contract in `toolchain.json`, installs only missing system packages, prepares ROS, PX4, Gazebo, px4_msgs and Micro XRCE-DDS, installs missing VS Code extensions, performs a PX4 SITL smoke build, and finishes with an exact compatibility verification.
+
+The primary supported profile is **WSL2 + Ubuntu 24.04 x86_64**. Native Ubuntu 24.04 x86_64 uses the same toolchain. Unsupported distributions or WSL1 fail before the automation modifies the system.
+
+## Deterministic stack
+
+The repository owns one compatibility contract:
+
+```text
+ROS 2                Jazzy
+PX4                   v1.17.0
+px4_msgs              release/1.17
+Micro XRCE-DDS Agent  v2.4.3
+Gazebo Sim            major 8 / Harmonic generation
+```
+
+The PX4/ROS bridge pairing follows PX4's supported Jazzy configuration. External source trees and locally built third-party tools are kept under `.workspace/`, so no absolute user path is required and no generated dependency is committed.
+
+Existing compatible clean `~/PX4-Autopilot` or `PX4_AUTOPILOT_DIR` checkouts are reused. Otherwise a clean pinned PX4 checkout is created under `.workspace/vendor/`. Dirty or incompatible external PX4 trees are never rewritten by the automation.
+
+## Daily workflow
 
 ```bash
-./dev init workspace
+./dev b                 # incremental build
+./dev r state           # build + run a node
+./dev n flight/flight   # create a node
+./dev h constants/foo   # create a header
+./dev verify            # verify exact stack contract
 ```
 
-This command is safe to run again. It checks or prepares the development toolchain, ROS dependencies, VS Code extensions, PX4 message interfaces, the first build, and compiler metadata used by IntelliSense.
+Node folders are optional. Every C++ source under `app/` containing `int main(...)` becomes an executable automatically; node filenames must only be unique across the project.
 
-Normal development:
-
-```bash
-./dev b
-```
-
-Start the simulator runtime:
+Simulation is one command:
 
 ```bash
 ./drone start
 ```
 
-Then use a separate terminal for your own ROS work:
+This starts the pinned Micro XRCE-DDS Agent in the background, verifies UDP 8888, and starts PX4 + Gazebo. In WSL2 it opens the PX4 runtime through Windows Terminal when available. Runtime commands:
 
 ```bash
-./dev r state
+./drone status
+./drone logs
+./drone logs -f
+./drone stop
+```
+
+ROS inspection stays separate:
+
+```bash
 ./ros topics
+./ros listen /fmu/out/vehicle_local_position_v1
+./ros once /fmu/out/vehicle_status_v1
+./ros rate /fmu/out/vehicle_local_position_v1
+./ros info /fmu/out/vehicle_local_position_v1
 ```
 
----
+## Managed workspace
 
-## Architecture
-
-Each root command has one responsibility:
-
-```text
-./dev    development/build/dependencies/VS Code
-./drone  PX4 + Gazebo + DDS runtime orchestration
-./ros    ROS graph inspection and interaction
-```
-
-`./drone start` keeps the Micro XRCE-DDS Agent in the background and opens PX4 + Gazebo in a separate WSL/Windows terminal. Your ROS terminal remains yours.
-
----
-
-## Clean workspace layout
-
-Only project-facing files stay visible at repository root:
-
-```text
-ros2/
-├── app/
-├── tools/
-├── .vscode/
-├── dev
-├── drone
-├── ros
-└── README.md
-```
-
-Generated, external, and runtime state is isolated in `.workspace/`:
+Everything machine-specific lives here and is gitignored:
 
 ```text
 .workspace/
-├── build/
-├── install/
-├── log/
-├── vendor/
-├── cache/
-├── runtime/
-└── compile_commands.json
+├── vendor/     # pinned source checkouts
+├── deps/       # local third-party installs
+├── build/      # colcon/CMake/PX4 build state
+├── install/    # ROS workspace install
+├── cache/      # compatibility/setup state
+├── log/        # build logs
+└── runtime/    # simulation pid/log state
 ```
 
-`.workspace/runtime/` contains only runtime metadata such as process identities and the background DDS Agent log. VS Code hides `.workspace/` from Explorer/search while still using its generated compiler metadata and PX4 headers.
+The repository root stays portable. Paths are derived from the repository location at runtime rather than from a username or fixed home directory.
 
-Older root-level `build/`, `install/`, `log/`, `vendor/`, `.cache/`, and `compile_commands.json` layouts are migrated automatically. External vendor/cache data is preserved; reproducible build artifacts are regenerated instead of being moved with stale absolute paths.
+## Hardware-aware behavior
 
----
-
-## `./drone` — simulation runtime console
-
-The normal command is:
-
-```bash
-./drone start
-```
-
-It performs a guarded startup sequence:
-
-```text
-validate WSL/PX4
-      ↓
-find or start MicroXRCEAgent
-      ↓
-verify UDP 8888 is actually bound
-      ↓
-prevent duplicate PX4 instances
-      ↓
-open a new WSL terminal
-      ↓
-make px4_sitl gz_x500
-      ↓
-PX4 + Gazebo ready for ROS
-```
-
-| Command | Purpose |
-|---|---|
-| `./drone start` | Start/reuse DDS Agent in background and open PX4 + Gazebo in a new terminal |
-| `./drone status` | Show Agent, UDP port, PX4 and Gazebo state |
-| `./drone stop` | Gracefully stop processes owned by this runtime console |
-| `./drone logs` | Show recent background DDS Agent logs |
-| `./drone logs -f` | Follow DDS Agent logs live |
-| `./drone doctor` | Validate WSL, PX4 checkout, Agent binary, port and Windows terminal launcher |
-
-Safety behavior:
-
-- repeated `./drone start` calls are idempotent and do not intentionally launch duplicate Agent/PX4 instances;
-- an existing compatible MicroXRCEAgent is reused instead of killed;
-- if UDP 8888 belongs to an unknown process, startup fails instead of taking it over;
-- process state stores both PID and Linux process start identity to reduce PID-reuse mistakes;
-- `./drone stop` does not kill external processes it did not start;
-- if PX4 window creation fails after this invocation started the Agent, that Agent is rolled back;
-- background logs live under `.workspace/runtime/logs/`.
-
-Defaults can be overridden without changing source:
-
-```text
-PX4_AUTOPILOT_DIR     default: ~/PX4-Autopilot
-PX4_SIM_TARGET        default: gz_x500
-XRCE_DDS_PORT         default: 8888
-MICRO_XRCE_AGENT_BIN  explicit Agent executable path
-```
-
----
-
-## `./dev` — development console
-
-| Command | Purpose |
-|---|---|
-| `./dev init workspace` | Initialize/migrate the workspace, prepare VS Code/PX4, perform first build |
-| `./dev b` | Incremental build + refresh IntelliSense |
-| `./dev rb` | Clean rebuild |
-| `./dev n sensors/imu` | Create `app/sensors/imu.cpp` |
-| `./dev h constants/topics` | Create `app/constants/topics.hpp` |
-| `./dev d sensor_msgs` | Add/install a ROS dependency |
-| `./dev r core` | Build and run a node |
-| `./dev ls` | List detected node executables |
-| `./dev px4` | Prepare/check version-matched PX4 ROS message interfaces |
-| `./dev check` | Validate project scripts, node discovery and workspace layout |
-| `./dev doctor` | Check WSL, ROS, Gazebo, compiler, VS Code and GPU |
-| `./dev fmt` | Format project C/C++ files |
-| `./dev clean` | Remove generated build/install/log while preserving vendor/runtime state |
-| `./dev shell` | Open a workspace-ready ROS shell |
-
-### Normal coding flow
-
-```bash
-./dev n state/state
-# write code in VS Code
-./dev b
-./dev r state
-```
-
-Headers under `app/` need no manual CMake entry. A `.cpp` containing `int main(...)` becomes a node executable automatically, and newly created files are discovered on the next `./dev b`.
-
----
-
-## PX4 interface automation
-
-`./dev init workspace`, `./dev b`, `./dev r ...` and `./dev rb` manage the ROS-side PX4 message interface automatically.
-
-```mermaid
-flowchart LR
-    PX4[~/PX4-Autopilot] --> VERSION[Detect release]
-    VERSION --> MSGS[.workspace/vendor/px4_msgs]
-    MSGS --> COLCON[colcon]
-    COLCON --> INSTALL[.workspace/install]
-    INSTALL --> CC[compile_commands.json]
-    CC --> VSCODE[VS Code]
-```
-
-The automation detects the local PX4 release, selects the matching `px4_msgs` release line, refuses to overwrite dirty or unexpected vendor repositories, never modifies `~/PX4-Autopilot`, and only rebuilds the interface when necessary.
-
-After that, normal C++ includes are resolved through the same workflow:
-
-```cpp
-#include "px4_msgs/msg/vehicle_local_position.hpp"
-```
-
-`./dev` manages the ROS-side interface/build environment. `./drone` manages the simulator runtime. PX4's low-level control stack itself remains inside the PX4 checkout.
-
----
-
-## `./ros` — ROS runtime console
-
-### Topics
-
-| Command | Purpose |
-|---|---|
-| `./ros topics` | List topics with message types |
-| `./ros listen /drone/status` | Continuously print a topic |
-| `./ros once /drone/status` | Read one message |
-| `./ros rate /drone/status` | Show message frequency |
-| `./ros info /drone/status` | Show publishers/subscribers/QoS |
-| `./ros send TOPIC TYPE DATA` | Publish one message |
-
-### Nodes / services / parameters
-
-| Command | Purpose |
-|---|---|
-| `./ros nodes` | List running nodes |
-| `./ros node core` | Inspect a node |
-| `./ros run core` | Run an already-built node |
-| `./ros services` | List services |
-| `./ros call SERVICE TYPE DATA` | Call a service |
-| `./ros params core` | List node parameters |
-| `./ros get core PARAM` | Read a parameter |
-| `./ros set core PARAM VALUE` | Change a parameter |
-| `./ros doctor` | Check the ROS runtime environment |
-
-Short aliases:
-
-```text
-./ros t        -> topics
-./ros l TOPIC  -> listen
-./ros o TOPIC  -> once
-./ros hz TOPIC -> rate
-./ros n        -> nodes
-./ros r NODE   -> run
-./ros s        -> services
-```
-
----
+Build parallelism is derived deterministically from CPU count and available RAM and capped to avoid aggressive overcommit. GPU hardware is detected and reported, but GPU drivers are **never installed inside WSL**; WSL uses the Windows host GPU driver. Missing GPU access does not block compilation.
 
 ## VS Code
 
-`Ctrl + Shift + B` runs:
+The automation checks the recommended C++, CMake, ROS and Remote-WSL extensions. `Ctrl+Shift+B` runs the normal incremental build. IntelliSense reads the compiler database generated by the actual build at `.workspace/compile_commands.json`.
 
-```bash
-./dev b
-```
+## Safety rules
 
-The task palette also includes `Drone: Start Runtime`, `Drone: Status`, and `Drone: Stop Runtime`.
+The bootstrap is intentionally conservative: it refuses unsupported OS profiles, does not overwrite dirty third-party repositories, does not silently switch incompatible PX4 versions, does not install Linux NVIDIA drivers inside WSL, and does not SIGKILL runtime processes as a normal shutdown path.
 
-The C++ extension reads `.workspace/compile_commands.json`, so project, ROS, and generated PX4 include paths come from the real build configuration instead of hand-maintained guesses.
+CI validates the compatibility manifest, platform resolver, portable paths, Python syntax, shell syntax and the absence of generated Python bytecode on every push/PR.
