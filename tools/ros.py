@@ -1,327 +1,162 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
-from pathlib import Path
 
-import workspace_layout as layout
-
-ROOT = layout.ROOT
-PACKAGE = "drone"
-WORKSPACE_SETUP = layout.INSTALL_DIR / "setup.bash"
+import bootstrap
 
 
-def say(message=""):
-    print(message)
-
-
-def die(message, code=1):
+def fail(message):
     raise SystemExit(f"[FAIL] {message}")
 
 
-def run(args, *, check=True):
-    try:
-        return subprocess.run(args, check=check)
-    except FileNotFoundError:
-        die(f"command not found: {args[0]}")
-    except subprocess.CalledProcessError as exc:
-        die(f"command failed with exit code {exc.returncode}")
+def manifest():
+    return bootstrap.load_manifest()
 
 
-def capture(args):
-    try:
-        result = subprocess.run(
-            args,
-            check=True,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        return result.stdout.strip()
-    except FileNotFoundError:
-        die(f"command not found: {args[0]}")
-    except subprocess.CalledProcessError as exc:
-        detail = exc.stderr.strip() or exc.stdout.strip() or "unknown ROS error"
-        die(detail)
+def env_ready():
+    m = manifest()
+    info = bootstrap.detect_platform()
+    if not bootstrap.verify(m, info, strict=False):
+        print("[INFO] ROS/PX4 environment is not ready; repairing automatically", flush=True)
+        bootstrap.setup(m)
+    return bootstrap.ros_environment(m, include_workspace=True)
 
 
-def clean_name(value, kind):
-    value = value.strip()
-    if not value:
-        die(f"{kind} name cannot be empty")
-    if any(ch.isspace() for ch in value):
-        die(f"{kind} name cannot contain spaces: {value}")
-    if not value.startswith("/"):
-        value = "/" + value
-    return value
+def normalize_node(name):
+    return name if name.startswith("/") else "/" + name
 
 
-def topics():
-    output = capture(["ros2", "topic", "list"])
-    return [line.strip() for line in output.splitlines() if line.strip()]
+def run(args, *, env, check=True):
+    print("+ " + " ".join(args), flush=True)
+    return subprocess.run(args, env=env, check=check)
 
 
-def nodes():
-    output = capture(["ros2", "node", "list"])
-    return [line.strip() for line in output.splitlines() if line.strip()]
+def topics(env):
+    run(["ros2", "topic", "list", "-t"], env=env)
 
 
-def services():
-    output = capture(["ros2", "service", "list"])
-    return [line.strip() for line in output.splitlines() if line.strip()]
-
-
-def require_topic(name):
-    name = clean_name(name, "topic")
-    available = topics()
-    if name not in available:
-        preview = "\n".join(f"  {item}" for item in available[:20]) or "  (none)"
-        die(f"topic not found: {name}\nAvailable topics:\n{preview}")
-    return name
-
-
-def require_node(name):
-    name = clean_name(name, "node")
-    available = nodes()
-    if name not in available:
-        preview = "\n".join(f"  {item}" for item in available[:20]) or "  (none)"
-        die(f"node not found: {name}\nAvailable nodes:\n{preview}")
-    return name
-
-
-def require_service(name):
-    name = clean_name(name, "service")
-    available = services()
-    if name not in available:
-        preview = "\n".join(f"  {item}" for item in available[:20]) or "  (none)"
-        die(f"service not found: {name}\nAvailable services:\n{preview}")
-    return name
-
-
-def require_workspace():
-    if not WORKSPACE_SETUP.exists():
-        die("workspace is not built yet. Run: ./dev init workspace")
-
-
-def topic_list():
-    output = capture(["ros2", "topic", "list", "-t"])
-    say(output or "(no topics)")
-
-
-def topic_listen(name, once=False):
-    name = require_topic(name)
-    args = ["ros2", "topic", "echo"]
+def listen(topic, env, once=False):
+    cmd = ["ros2", "topic", "echo", topic]
     if once:
-        args.append("--once")
-    args.append(name)
-    run(args)
+        cmd += ["--once"]
+    run(cmd, env=env)
 
 
-def topic_rate(name):
-    run(["ros2", "topic", "hz", require_topic(name)])
+def rate(topic, env):
+    run(["ros2", "topic", "hz", topic], env=env)
 
 
-def topic_info(name):
-    run(["ros2", "topic", "info", "-v", require_topic(name)])
+def topic_info(topic, env):
+    run(["ros2", "topic", "info", "-v", topic], env=env)
 
 
-def topic_send(name, msg_type, data):
-    name = clean_name(name, "topic")
-    if not msg_type.strip():
-        die("message type cannot be empty")
-    if not data.strip():
-        die("message data cannot be empty")
-    run(["ros2", "topic", "pub", "--once", name, msg_type, data])
+def nodes(env):
+    run(["ros2", "node", "list"], env=env)
 
 
-def node_list():
-    items = nodes()
-    say("\n".join(items) if items else "(no nodes)")
+def node_info(node, env):
+    run(["ros2", "node", "info", normalize_node(node)], env=env)
 
 
-def node_info(name):
-    run(["ros2", "node", "info", require_node(name)])
+def run_node(node, env, extra):
+    run(["ros2", "run", "drone", node, *extra], env=env)
 
 
-def run_node(name):
-    require_workspace()
-    name = name.strip()
-    if not name or "/" in name or any(ch.isspace() for ch in name):
-        die("node executable must be a simple name, e.g. core")
-    executables = capture(["ros2", "pkg", "executables", PACKAGE]).splitlines()
-    names = {
-        line.split(maxsplit=1)[1]
-        for line in executables
-        if len(line.split(maxsplit=1)) == 2
-    }
-    if name not in names:
-        preview = "\n".join(f"  {item}" for item in sorted(names)) or "  (none)"
-        die(
-            f"executable not found: {name}\nBuilt executables:\n{preview}\n"
-            "Run ./dev b after adding a node."
-        )
-    run(["ros2", "run", PACKAGE, name])
+def services(env):
+    run(["ros2", "service", "list", "-t"], env=env)
 
 
-def service_list():
-    output = capture(["ros2", "service", "list", "-t"])
-    say(output or "(no services)")
+def params(node, env):
+    run(["ros2", "param", "list", normalize_node(node)], env=env)
 
 
-def service_call(name, srv_type, data):
-    name = require_service(name)
-    if not srv_type.strip():
-        die("service type cannot be empty")
-    if not data.strip():
-        die("service data cannot be empty")
-    run(["ros2", "service", "call", name, srv_type, data])
+def get_param(node, param, env):
+    run(["ros2", "param", "get", normalize_node(node), param], env=env)
 
 
-def param_list(node):
-    run(["ros2", "param", "list", require_node(node)])
+def set_param(node, param, value, env):
+    run(["ros2", "param", "set", normalize_node(node), param, value], env=env)
 
 
-def param_get(node, param):
-    node = require_node(node)
-    if not param.strip():
-        die("parameter name cannot be empty")
-    run(["ros2", "param", "get", node, param])
-
-
-def param_set(node, param, value):
-    node = require_node(node)
-    if not param.strip():
-        die("parameter name cannot be empty")
-    if not value.strip():
-        die("parameter value cannot be empty")
-    run(["ros2", "param", "set", node, param, value])
-
-
-def doctor():
-    layout.ensure()
-    checks = [
-        ("ROS_DISTRO", os.environ.get("ROS_DISTRO", "(unset)")),
-        ("ROS_DOMAIN_ID", os.environ.get("ROS_DOMAIN_ID", "0")),
-        ("workspace", "built" if WORKSPACE_SETUP.exists() else "not built"),
-        ("workspace_path", str(layout.STATE_DIR.relative_to(ROOT))),
-    ]
-    for key, value in checks:
-        say(f"[OK] {key}={value}")
-
-    say(
-        f"[OK] ROS graph reachable: {len(nodes())} node(s), "
-        f"{len(topics())} topic(s), {len(services())} service(s)"
-    )
+def doctor(env):
+    run(["ros2", "doctor", "--report"], env=env, check=False)
 
 
 def help_text():
-    say(
-        """ROS console
+    print('''Usage:
+  ./ros topics                    list topics + message types
+  ./ros listen TOPIC              continuously echo a topic
+  ./ros once TOPIC                print one message
+  ./ros rate TOPIC                show publish frequency
+  ./ros info TOPIC                publishers/subscribers/QoS
+  ./ros nodes                     list nodes
+  ./ros node NAME                 inspect node
+  ./ros run NODE [args...]        run an already-built node
+  ./ros services                  list services
+  ./ros params NODE               list parameters
+  ./ros get NODE PARAM            read parameter
+  ./ros set NODE PARAM VALUE      write parameter
+  ./ros send TOPIC TYPE DATA      publish one message
+  ./ros call SERVICE TYPE DATA    call a service
+  ./ros doctor                    ROS report
 
-Topics
-  ./ros topics
-  ./ros listen TOPIC
-  ./ros once TOPIC
-  ./ros rate TOPIC
-  ./ros info TOPIC
-  ./ros send TOPIC TYPE DATA
-
-Nodes
-  ./ros nodes
-  ./ros node NAME
-  ./ros run NAME
-
-Services
-  ./ros services
-  ./ros call SERVICE TYPE DATA
-
-Parameters
-  ./ros params NODE
-  ./ros get NODE PARAM
-  ./ros set NODE PARAM VALUE
-
-System
-  ./ros doctor
-  ./ros help
-
-Examples
-  ./ros listen /drone/status
-  ./ros once /drone/status
-  ./ros run core
-  ./ros send /demo std_msgs/msg/String '{data: hello}'
-"""
-    )
-
-
-def need(args, count, usage):
-    if len(args) < count:
-        die(f"usage: {usage}")
+Aliases: t=topics, l=listen, o=once, hz=rate, n=nodes, r=run, s=services
+''')
 
 
 def main():
     args = sys.argv[1:]
-    command = args[0] if args else "help"
+    cmd = args[0] if args else "help"
+    if cmd in {"help", "-h", "--help"}:
+        help_text(); return
+    env = env_ready()
     rest = args[1:]
 
-    aliases = {
-        "t": "topics",
-        "l": "listen",
-        "o": "once",
-        "hz": "rate",
-        "n": "nodes",
-        "r": "run",
-        "s": "services",
-        "h": "help",
-    }
-    command = aliases.get(command, command)
-
-    if command == "topics":
-        topic_list()
-    elif command == "listen":
-        need(rest, 1, "./ros listen TOPIC")
-        topic_listen(rest[0])
-    elif command == "once":
-        need(rest, 1, "./ros once TOPIC")
-        topic_listen(rest[0], once=True)
-    elif command == "rate":
-        need(rest, 1, "./ros rate TOPIC")
-        topic_rate(rest[0])
-    elif command == "info":
-        need(rest, 1, "./ros info TOPIC")
-        topic_info(rest[0])
-    elif command == "send":
-        need(rest, 3, "./ros send TOPIC TYPE DATA")
-        topic_send(rest[0], rest[1], " ".join(rest[2:]))
-    elif command == "nodes":
-        node_list()
-    elif command == "node":
-        need(rest, 1, "./ros node NAME")
-        node_info(rest[0])
-    elif command == "run":
-        need(rest, 1, "./ros run NAME")
-        run_node(rest[0])
-    elif command == "services":
-        service_list()
-    elif command == "call":
-        need(rest, 3, "./ros call SERVICE TYPE DATA")
-        service_call(rest[0], rest[1], " ".join(rest[2:]))
-    elif command == "params":
-        need(rest, 1, "./ros params NODE")
-        param_list(rest[0])
-    elif command == "get":
-        need(rest, 2, "./ros get NODE PARAM")
-        param_get(rest[0], rest[1])
-    elif command == "set":
-        need(rest, 3, "./ros set NODE PARAM VALUE")
-        param_set(rest[0], rest[1], " ".join(rest[2:]))
-    elif command == "doctor":
-        doctor()
-    elif command in {"help", "--help", "-h"}:
-        help_text()
+    if cmd in {"topics", "t"}:
+        topics(env)
+    elif cmd in {"listen", "l"}:
+        if len(rest) != 1: fail("Usage: ./ros listen TOPIC")
+        listen(rest[0], env)
+    elif cmd in {"once", "o"}:
+        if len(rest) != 1: fail("Usage: ./ros once TOPIC")
+        listen(rest[0], env, once=True)
+    elif cmd in {"rate", "hz"}:
+        if len(rest) != 1: fail("Usage: ./ros rate TOPIC")
+        rate(rest[0], env)
+    elif cmd == "info":
+        if len(rest) != 1: fail("Usage: ./ros info TOPIC")
+        topic_info(rest[0], env)
+    elif cmd in {"nodes", "n"}:
+        nodes(env)
+    elif cmd == "node":
+        if len(rest) != 1: fail("Usage: ./ros node NAME")
+        node_info(rest[0], env)
+    elif cmd in {"run", "r"}:
+        if not rest: fail("Usage: ./ros run NODE [args...]")
+        run_node(rest[0], env, rest[1:])
+    elif cmd in {"services", "s"}:
+        services(env)
+    elif cmd == "params":
+        if len(rest) != 1: fail("Usage: ./ros params NODE")
+        params(rest[0], env)
+    elif cmd == "get":
+        if len(rest) != 2: fail("Usage: ./ros get NODE PARAM")
+        get_param(rest[0], rest[1], env)
+    elif cmd == "set":
+        if len(rest) != 3: fail("Usage: ./ros set NODE PARAM VALUE")
+        set_param(rest[0], rest[1], rest[2], env)
+    elif cmd == "send":
+        if len(rest) != 3: fail("Usage: ./ros send TOPIC TYPE DATA")
+        run(["ros2", "topic", "pub", "--once", rest[0], rest[1], rest[2]], env=env)
+    elif cmd == "call":
+        if len(rest) != 3: fail("Usage: ./ros call SERVICE TYPE DATA")
+        run(["ros2", "service", "call", rest[0], rest[1], rest[2]], env=env)
+    elif cmd == "doctor":
+        doctor(env)
     else:
-        die(f"unknown command: {command}\nRun ./ros help")
+        fail(f"unknown command: {cmd}")
 
 
 if __name__ == "__main__":
