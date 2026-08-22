@@ -2,19 +2,16 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Dev: Init Workspace",
+      "label": "Workspace: Setup / Repair",
       "type": "shell",
-      "command": "./dev init workspace",
+      "command": "./dev setup",
       "problemMatcher": []
     },
     {
       "label": "Dev: Build",
       "type": "shell",
       "command": "./dev b",
-      "group": {
-        "kind": "build",
-        "isDefault": true
-      },
+      "group": { "kind": "build", "isDefault": true },
       "problemMatcher": "$gcc"
     },
     {
@@ -24,37 +21,19 @@
       "problemMatcher": "$gcc"
     },
     {
-      "label": "Dev: Check",
+      "label": "Dev: Verify Toolchain",
       "type": "shell",
-      "command": "./dev check",
+      "command": "./dev verify",
       "problemMatcher": []
     },
     {
-      "label": "Dev: Doctor",
-      "type": "shell",
-      "command": "./dev doctor",
-      "problemMatcher": []
-    },
-    {
-      "label": "Dev: Rebuild",
-      "type": "shell",
-      "command": "./dev rb",
-      "problemMatcher": "$gcc"
-    },
-    {
-      "label": "Drone: Start Runtime",
+      "label": "Drone: Start Simulation",
       "type": "shell",
       "command": "./drone start",
       "problemMatcher": []
     },
     {
-      "label": "Drone: Status",
-      "type": "shell",
-      "command": "./drone status",
-      "problemMatcher": []
-    },
-    {
-      "label": "Drone: Stop Runtime",
+      "label": "Drone: Stop Simulation",
       "type": "shell",
       "command": "./drone stop",
       "problemMatcher": []
@@ -64,31 +43,13 @@
       "type": "shell",
       "command": "./ros topics",
       "problemMatcher": []
-    },
-    {
-      "label": "ROS: Listen Topic",
-      "type": "shell",
-      "command": "./ros listen ${input:topic}",
-      "isBackground": true,
-      "problemMatcher": []
-    },
-    {
-      "label": "ROS: Doctor",
-      "type": "shell",
-      "command": "./ros doctor",
-      "problemMatcher": []
     }
   ],
   "inputs": [
     {
       "id": "node",
       "type": "promptString",
-      "description": "Node name, e.g. core or imu"
-    },
-    {
-      "id": "topic",
-      "type": "promptString",
-      "description": "Topic name, e.g. /drone/status"
+      "description": "Node executable name"
     }
   ]
 }
