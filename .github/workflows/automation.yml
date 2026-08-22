@@ -1,0 +1,25 @@
+name: Automation Contract
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  static-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python syntax
+        run: python3 -m py_compile tools/*.py
+      - name: Shell syntax
+        run: bash -n dev ros drone
+      - name: Deterministic resolver tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Manifest parse
+        run: python3 -m json.tool toolchain.json >/dev/null
+      - name: Ensure generated Python files are not tracked
+        run: |
+          if git ls-files | grep -E '(^|/)__pycache__/|\.pyc$'; then
+            echo 'Generated Python bytecode must not be committed.'
+            exit 1
+          fi
