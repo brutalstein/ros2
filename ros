@@ -1,21 +1,4 @@
 #!/usr/bin/env bash
 set -eo pipefail
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROS_DISTRO="${ROS_DISTRO:-jazzy}"
-ROS_SETUP="/opt/ros/${ROS_DISTRO}/setup.bash"
-WORKSPACE_SETUP="${ROOT}/.workspace/install/setup.bash"
-LAYOUT="${ROOT}/tools/workspace_layout.py"
-
-if [[ ! -f "${ROS_SETUP}" ]]; then
-  echo "[FAIL] ROS 2 ${ROS_DISTRO} not found: ${ROS_SETUP}" >&2
-  exit 1
-fi
-
-# Keep the runtime console compatible with repositories created before layout v2.
-python3 "${LAYOUT}" --migrate
-
-source "${ROS_SETUP}"
-[[ -f "${WORKSPACE_SETUP}" ]] && source "${WORKSPACE_SETUP}"
-
 exec python3 "${ROOT}/tools/ros.py" "$@"
