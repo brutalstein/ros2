@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import os
 import re
-import shutil
 import subprocess
 import sys
 import xml.etree.ElementTree as ET
@@ -207,6 +206,7 @@ def build():
 
 
 def clean():
+    import shutil
     for path in (bootstrap.BUILD / "drone", bootstrap.INSTALL / "drone"):
         if path.exists():
             shutil.rmtree(path)
