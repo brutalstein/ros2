@@ -1,4 +1,48 @@
 #!/usr/bin/env bash
 set -eo pipefail
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCENARIO_TOOL="${ROOT}/tools/scenarios.py"
+WORLDS_DIR="${ROOT}/simulation/worlds"
+
+case "${1:-}" in
+  scenarios)
+    exec python3 "${SCENARIO_TOOL}" list
+    ;;
+  scenario)
+    if [[ "${2:-}" == "reset" ]]; then
+      exec python3 "${SCENARIO_TOOL}" reset
+    fi
+    if [[ -z "${2:-}" ]]; then
+      exec python3 "${SCENARIO_TOOL}" current
+    fi
+    exec python3 "${SCENARIO_TOOL}" select "$2"
+    ;;
+  current-scenario)
+    exec python3 "${SCENARIO_TOOL}" current
+    ;;
+esac
+
+# Convenience: a scenario name can be passed directly to start.
+# Existing vehicle aliases such as `camera`, `plain`, `down` and `depth`
+# continue to be forwarded to tools/drone.py unchanged.
+if [[ "${1:-}" == "start" && -n "${2:-}" ]] && python3 "${SCENARIO_TOOL}" is-known "$2" >/dev/null 2>&1; then
+  python3 "${SCENARIO_TOOL}" select "$2" >/dev/null
+  set -- start "${@:3}"
+fi
+
+SELECTED_SCENARIO="$(python3 "${SCENARIO_TOOL}" current --name-only)"
+export PX4_GZ_WORLD="${SELECTED_SCENARIO}"
+export GZ_SIM_RESOURCE_PATH="${WORLDS_DIR}${GZ_SIM_RESOURCE_PATH:+:${GZ_SIM_RESOURCE_PATH}}"
+
+if [[ "${1:-}" == "start" ]]; then
+  echo "[INFO] scenario: ${PX4_GZ_WORLD}"
+fi
+
+if [[ "${1:-}" == "status" ]]; then
+  python3 "${ROOT}/tools/drone.py" "$@"
+  python3 "${SCENARIO_TOOL}" current
+  exit 0
+fi
+
 exec python3 "${ROOT}/tools/drone.py" "$@"

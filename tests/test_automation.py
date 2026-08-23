@@ -1,6 +1,7 @@
 import json
 import sys
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,6 +68,33 @@ class ToolchainContractTests(unittest.TestCase):
         cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
         self.assertNotIn('target_link_libraries("${node}" PRIVATE', cmake)
         self.assertNotIn("target_link_libraries(drone_lib PUBLIC", cmake)
+
+    def test_scenario_world_contract(self):
+        config_path = ROOT / "simulation" / "scenarios.json"
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(config["default"], "training_field")
+        self.assertGreaterEqual(len(config["scenarios"]), 3)
+        worlds_dir = ROOT / config["worlds_dir"]
+
+        for name in config["scenarios"]:
+            world_path = worlds_dir / f"{name}.sdf"
+            self.assertTrue(world_path.is_file(), f"missing scenario world: {name}")
+            root = ET.parse(world_path).getroot()
+            self.assertEqual(root.tag, "sdf")
+            self.assertEqual(root.get("version"), "1.9")
+            world = root.find("world")
+            self.assertIsNotNone(world)
+            self.assertEqual(world.get("name"), name)
+            self.assertIsNotNone(world.find("physics"))
+            self.assertIsNotNone(world.find("gravity"))
+            self.assertIsNotNone(world.find("spherical_coordinates"))
+            self.assertIsNotNone(world.find("model[@name='ground_plane']"))
+
+    def test_drone_launcher_exports_repo_world_path(self):
+        launcher = (ROOT / "drone").read_text(encoding="utf-8")
+        self.assertIn("GZ_SIM_RESOURCE_PATH", launcher)
+        self.assertIn("PX4_GZ_WORLD", launcher)
+        self.assertIn("tools/scenarios.py", launcher)
 
     def test_camera_topic_discovery_is_instance_agnostic(self):
         camera = self.manifest["stack"]["camera_bridge"]
