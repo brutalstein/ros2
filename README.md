@@ -4,7 +4,7 @@
 
 **WSL2 / Ubuntu 24.04 · ROS 2 Jazzy · PX4 v1.17 · Gazebo Harmonic · C++17 · VS Code**
 
-Clone, run one setup command, then build or simulate.
+One deterministic simulation runtime, one C++ application entry point.
 
 </div>
 
@@ -17,13 +17,11 @@ cd /path/to/ros2
 ./dev setup
 ```
 
-`./dev setup` is an idempotent machine bootstrap. It detects the OS, WSL generation, architecture, CPU count, RAM, GPU visibility, repository location and available VS Code integration before changing anything. It then resolves the pinned compatibility contract in `toolchain.json`, installs only missing system packages, prepares ROS, PX4, Gazebo, ROS/Gazebo bridge support, px4_msgs and Micro XRCE-DDS, installs missing VS Code extensions, performs a PX4 SITL smoke build, and finishes with an exact compatibility verification.
+`./dev setup` is an idempotent machine bootstrap. It detects the platform and hardware, resolves the pinned compatibility contract in `toolchain.json`, installs only missing dependencies, prepares ROS, PX4, Gazebo, px4_msgs and Micro XRCE-DDS, and verifies the resulting stack.
 
-The primary supported profile is **WSL2 + Ubuntu 24.04 x86_64**. Native Ubuntu 24.04 x86_64 uses the same toolchain. Paths, runtime discovery and terminal handling are portable inside those supported profiles. Unsupported distributions, WSL1, native Windows and macOS fail clearly instead of receiving untested system modifications; this repository intentionally does not claim universal operating-system support.
+The primary supported profile is **WSL2 + Ubuntu 24.04 x86_64**. Native Ubuntu 24.04 x86_64 uses the same toolchain.
 
 ## Deterministic stack
-
-The repository owns one compatibility contract:
 
 ```text
 ROS 2                Jazzy
@@ -33,101 +31,147 @@ px4_msgs              release/1.17
 Micro XRCE-DDS Agent  v2.4.3
 Gazebo Sim            major 8 / Harmonic generation
 Default vehicle       gz_x500_mono_cam
+Default scenario      training_field
 ```
 
-The PX4/ROS bridge pairing follows PX4's supported Jazzy configuration. External source trees and locally built third-party tools are kept under `.workspace/`, so no absolute user path is required and no generated dependency is committed.
+External source trees and generated dependencies live under `.workspace/`. The repository does not require user-specific absolute paths.
 
-Existing compatible clean `~/PX4-Autopilot` or `PX4_AUTOPILOT_DIR` checkouts are reused. Otherwise a clean pinned PX4 checkout is created under `.workspace/vendor/`. Dirty or incompatible external PX4 trees are never rewritten by the automation.
+## Application architecture: one entry point
 
-## Perception and autonomy foundation
+`app/main.cpp` is the **only C++ `main()` in the application**. Core, state, sensors, camera, flight and future autonomy components are node modules linked into one executable named `drone_app`.
 
-The toolchain also pre-installs a deliberately small foundation for the next autonomy layers instead of waiting for each first compile to fail. `./dev setup` guarantees the camera/image path (`sensor_msgs`, `cv_bridge`, `image_transport`, `image_geometry`), time synchronization (`message_filters`), standard detection messages (`vision_msgs`), geometry/navigation messages, TF2 transforms, OpenCV 4 development libraries and Eigen3.
+```text
+app/main.cpp
+     │
+     ├── CoreNode
+     ├── StateNode
+     ├── SensorsNode
+     ├── CameraNode
+     └── FlightNode
+```
 
-These dependencies cover the expected camera → OpenCV → perception → coordinate transform → planning pipeline without choosing a heavyweight inference runtime yet. CUDA-specific ML stacks such as TensorRT or ONNX Runtime are intentionally not pinned here; they will be added only when the inference architecture is chosen so the project does not create avoidable CUDA/version conflicts.
+CMake rejects any extra `main()` under `app/`. Node implementation files expose a `make_<name>_node()` factory instead.
 
-OpenCV and Eigen are wired into the shared CMake build baseline, so new C++ nodes can use them without hand-editing CMake. ROS dependencies used by source files are still declared normally in `package.xml` and the development automation continues to discover ROS include dependencies automatically.
+The development automation follows the same rule. Creating a module:
+
+```bash
+./dev n perception/detector
+```
+
+automatically creates:
+
+```text
+app/perception/detector.cpp
+app/perception/detector.hpp
+```
+
+and registers `make_detector_node()` in `app/main.cpp`. No manual CMake edit or second process entry point is needed.
 
 ## Daily workflow
 
 ```bash
-./dev b                 # incremental build
-./dev r state           # build + run a node
-./dev n flight/flight   # create a node
-./dev h constants/foo   # create a header
-./dev verify            # verify exact stack contract
+./dev b                         # incremental application build
+./dev r                         # build + run the complete app/main.cpp system
+./dev n perception/detector     # create + register a new node module
+./dev h constants/foo           # create a generic header
+./dev ls                        # show entrypoint and linked modules
+./dev check                     # validate architecture + automation
+./dev verify                    # verify exact stack contract
 ```
 
-Node folders are optional. Every C++ source under `app/` containing `int main(...)` becomes an executable automatically; node filenames must only be unique across the project.
+`./dev r` always runs the complete application, not an individual node.
 
-## One-command simulation and camera
+## Simulation runtime
 
-The default simulation is now the PX4 X500 monocular-camera vehicle:
+The simulation infrastructure remains deliberately separate from the C++ application process:
+
+```text
+./drone start
+     │
+     ├── Gazebo server + GUI
+     ├── selected repository-owned scenario
+     ├── PX4 SITL
+     ├── Micro XRCE-DDS Agent
+     └── ros_gz camera bridge
+```
+
+Gazebo worlds live under `simulation/worlds/`. The default is `training_field`.
+
+```bash
+./drone scenarios
+./drone scenario urban_block
+./drone scenario industrial_yard
+./drone scenario reset
+```
+
+The runtime starts repository-owned worlds directly from their absolute SDF path, validates them before launch, and connects PX4 using its supported standalone Gazebo mode. Gazebo server and GUI are runtime-owned processes so `./drone stop` can shut them down reliably.
+
+Useful runtime commands:
 
 ```bash
 ./drone start
-```
-
-One command now:
-
-1. verifies or repairs the pinned dependencies,
-2. installs `ros_gz` automatically if it is missing,
-3. starts the managed Micro XRCE-DDS Agent,
-4. starts PX4 + Gazebo with `gz_x500_mono_cam`,
-5. discovers the actual Gazebo camera topic dynamically instead of assuming an instance number such as `_0`,
-6. starts `ros_gz_bridge` in the background,
-7. converts Gazebo image and camera-info messages to ROS 2,
-8. remaps the long Gazebo names to the stable application API below.
-
-```text
-/camera/image_raw    sensor_msgs/msg/Image
-/camera/camera_info  sensor_msgs/msg/CameraInfo
-```
-
-No manual `gz topic` lookup, `parameter_bridge` command, world name, model instance number or topic remap is required during normal use.
-
-Useful variants:
-
-```bash
-./drone start camera   # same as the default
-./drone start plain    # normal X500, no camera bridge
-./drone start down     # PX4 down-facing mono-camera X500
-./drone start depth    # PX4 depth-camera X500; generic RGB bridge is not forced
-```
-
-Advanced raw PX4 target overrides still work:
-
-```bash
-PX4_SIM_TARGET=gz_x500 ./drone start
-./drone start gz_x500
-```
-
-Unlike the old runtime, the selected target is explicitly carried into the WSL/new-terminal process, so a target override is not lost when PX4 opens in another terminal.
-
-Runtime commands:
-
-```bash
 ./drone status
 ./drone logs
-./drone logs -f
-./drone doctor
+./drone gz-logs
+./drone cleanup
 ./drone stop
 ```
 
-`./drone status` also reports the camera bridge and stable ROS camera topics. `./drone stop` shuts the camera bridge down before PX4/Gazebo and the DDS Agent.
+## First autonomous command: takeoff
 
-ROS inspection stays separate:
+`FlightNode` is part of `app/main.cpp` and currently implements the first closed-loop flight action: **safe PX4 Offboard takeoff followed by hover**.
 
-```bash
-./ros topics
-./ros info /camera/image_raw
-./ros listen /fmu/out/vehicle_local_position_v1
-./ros once /fmu/out/vehicle_status_v1
-./ros rate /fmu/out/vehicle_local_position_v1
+Default behavior:
+
+```text
+wait for PX4 status + valid local position
+              ↓
+wait for PX4 preflight checks
+              ↓
+capture local NED takeoff origin
+              ↓
+stream Offboard heartbeat + hold setpoint at 10 Hz for 2 s
+              ↓
+request OFFBOARD mode + normal arm
+              ↓
+command z = origin_z - 3 m
+              ↓
+climb to ~3 m
+              ↓
+hold position / hover
 ```
 
-## Camera data path
+The code does **not** force-arm or bypass PX4 health checks. If PX4 is not ready or is in failsafe, takeoff is paused instead of overriding the autopilot.
 
-The raw simulation image intentionally does not travel through PX4's uXRCE-DDS path:
+Normal use is two terminals:
+
+```bash
+# Terminal 1: simulator / flight stack infrastructure
+./drone start
+```
+
+```bash
+# Terminal 2: the one C++ application
+./dev r
+```
+
+The default takeoff altitude is 3 metres. It can be changed through the ROS parameter:
+
+```bash
+./dev r --ros-args -p takeoff_altitude_m:=5.0
+```
+
+Automatic takeoff can be disabled while still running the rest of the application:
+
+```bash
+./dev r --ros-args -p auto_takeoff:=false
+```
+
+## Camera and perception foundation
+
+`./dev setup` guarantees the foundational image/perception dependencies: `sensor_msgs`, `cv_bridge`, `image_transport`, `image_geometry`, `message_filters`, `vision_msgs`, geometry/navigation messages, TF2, OpenCV 4 and Eigen3.
+
+The simulation camera path is intentionally separate from PX4 flight-state transport:
 
 ```text
 Gazebo camera
@@ -138,44 +182,59 @@ ros_gz_bridge
      ↓
 /camera/image_raw
      ↓
-CameraNode / perception
+CameraNode
+     ↓
+cv_bridge
+     ↓
+OpenCV cv::Mat
 ```
 
-PX4 state data follows its separate flight-data path:
+PX4 flight/state data follows:
 
 ```text
 Gazebo sensors → PX4 → uORB → uXRCE-DDS → Micro XRCE-DDS Agent → ROS 2
 ```
 
-Keeping the high-bandwidth image path separate prevents the flight-control communication path from becoming a video transport layer.
+Stable camera API:
+
+```text
+/camera/image_raw    sensor_msgs/msg/Image
+/camera/camera_info  sensor_msgs/msg/CameraInfo
+```
+
+## ROS inspection
+
+```bash
+./ros topics
+./ros info /camera/image_raw
+./ros listen /fmu/out/vehicle_local_position_v1
+./ros once /fmu/out/vehicle_status_v1
+./ros rate /fmu/out/vehicle_local_position_v1
+```
 
 ## Managed workspace
-
-Everything machine-specific lives here and is gitignored:
 
 ```text
 .workspace/
 ├── vendor/     # pinned source checkouts
-├── deps/       # local third-party installs
-├── build/      # colcon/CMake/PX4 build state
+├── deps/       # locally built dependencies
+├── build/      # build state
 ├── install/    # ROS workspace install
-├── cache/      # compatibility/setup state
+├── cache/      # setup state
 ├── log/        # build logs
-└── runtime/    # PX4, DDS Agent and camera bridge pid/log state
+└── runtime/    # PX4 / Gazebo / bridge runtime state and logs
 ```
-
-The repository root stays portable. Paths are derived from the repository location at runtime rather than from a username or fixed home directory. Camera discovery also uses the live Gazebo graph, so model instance suffixes such as `_0`, `_1` or `_12` are not hard-coded.
 
 ## Hardware-aware behavior
 
-Build parallelism is derived deterministically from CPU count and available RAM and capped to avoid aggressive overcommit. GPU hardware is detected and reported, but GPU drivers are **never installed inside WSL**; WSL uses the Windows host GPU driver. Missing GPU access does not block compilation.
+Build parallelism is derived from CPU count and available RAM and capped to avoid aggressive overcommit. GPU hardware is detected and reported, but Linux NVIDIA drivers are never installed inside WSL; WSL uses the Windows host GPU driver.
 
 ## VS Code
 
-The automation checks the recommended C++, CMake, ROS and Remote-WSL extensions. `Ctrl+Shift+B` runs the normal incremental build. IntelliSense reads the compiler database generated by the actual build at `.workspace/compile_commands.json`.
+The automation checks the recommended C++, CMake, ROS and Remote-WSL extensions. IntelliSense uses `.workspace/compile_commands.json`, generated from the real build.
 
 ## Safety rules
 
-The bootstrap is intentionally conservative: it refuses unsupported OS profiles, does not overwrite dirty third-party repositories, does not silently switch incompatible PX4 versions, does not install Linux NVIDIA drivers inside WSL, and does not SIGKILL runtime processes as a normal shutdown path.
+The bootstrap refuses unsupported OS profiles, does not overwrite dirty third-party repositories, does not silently change pinned PX4 versions, and does not install Linux NVIDIA drivers inside WSL. Flight code does not bypass PX4 preflight or arming safety checks. Gazebo SIGKILL escalation is restricted to runtime-owned Gazebo process groups when graceful shutdown fails.
 
-CI validates the compatibility manifest, camera runtime contract, perception dependency baseline, dynamic camera-topic selection, platform resolver, portable paths, Python syntax, shell syntax and the absence of generated Python bytecode on every push/PR.
+CI validates the compatibility manifest, single-entry application architecture, offboard takeoff contract, camera/perception baseline, scenario worlds, Gazebo runtime contract, portable paths, Python/shell syntax and generated-file hygiene on every push and pull request.

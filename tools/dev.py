@@ -14,9 +14,15 @@ import bootstrap
 ROOT = bootstrap.ROOT
 APP = ROOT / "app"
 PACKAGE_XML = APP / "package.xml"
+MAIN_CPP = APP / "main.cpp"
+ENTRY_EXECUTABLE = "drone_app"
 CODE_SUFFIXES = {".cpp", ".cc", ".cxx", ".hpp", ".h"}
-NODE_RE = re.compile(r"(?m)^[ \t]*int\s+main\s*\(")
+MAIN_RE = re.compile(r"(?m)^[ \t]*int\s+main\s*\(")
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+INCLUDE_BEGIN = "// DRONE_NODE_INCLUDES_BEGIN"
+INCLUDE_END = "// DRONE_NODE_INCLUDES_END"
+FACTORY_BEGIN = "// DRONE_NODE_FACTORIES_BEGIN"
+FACTORY_END = "// DRONE_NODE_FACTORIES_END"
 
 
 def say(message=""):
@@ -54,27 +60,27 @@ def cpp_files():
     return [p for p in code_files() if p.suffix in {".cpp", ".cc", ".cxx"}]
 
 
-def node_files():
-    return [p for p in cpp_files() if NODE_RE.search(read(p))]
+def module_files():
+    return [p for p in cpp_files() if p != MAIN_CPP]
 
 
-def node_map():
-    nodes = {}
+def module_map():
+    modules = {}
     duplicates = {}
-    for path in node_files():
+    for path in module_files():
         name = path.stem
-        if name in nodes:
-            duplicates.setdefault(name, [nodes[name]]).append(path)
+        if name in modules:
+            duplicates.setdefault(name, [modules[name]]).append(path)
         else:
-            nodes[name] = path
+            modules[name] = path
     if duplicates:
-        lines = ["Duplicate node executable names found:"]
+        lines = ["Duplicate module names found:"]
         for name, paths in sorted(duplicates.items()):
             lines.append(f"  {name}")
             lines.extend(f"    - {p.relative_to(ROOT)}" for p in paths)
-        lines.append("Node filenames must be unique across app/.")
+        lines.append("Module filenames must be unique across app/.")
         fail("\n".join(lines))
-    return nodes
+    return modules
 
 
 def validate_project():
@@ -85,15 +91,34 @@ def validate_project():
         errors.append("app/package.xml is missing")
     if not (APP / "CMakeLists.txt").is_file():
         errors.append("app/CMakeLists.txt is missing")
+    if not MAIN_CPP.is_file():
+        errors.append("app/main.cpp is missing; it is the only allowed application entry point")
+
     if PACKAGE_XML.exists():
         try:
             ET.parse(PACKAGE_XML)
         except ET.ParseError as exc:
             errors.append(f"invalid package.xml: {exc}")
+
+    if MAIN_CPP.exists():
+        main_text = read(MAIN_CPP)
+        if not MAIN_RE.search(main_text):
+            errors.append("app/main.cpp must define int main(...)")
+        for marker in (INCLUDE_BEGIN, INCLUDE_END, FACTORY_BEGIN, FACTORY_END):
+            if marker not in main_text:
+                errors.append(f"app/main.cpp is missing automation marker: {marker}")
+
+    for path in module_files():
+        if MAIN_RE.search(read(path)):
+            errors.append(
+                f"{path.relative_to(ROOT)} defines main(); only app/main.cpp may own process startup"
+            )
+
     try:
-        node_map()
+        module_map()
     except SystemExit as exc:
         errors.append(str(exc).removeprefix("[FAIL] "))
+
     if errors:
         fail("\n".join(errors))
 
@@ -217,20 +242,63 @@ def clean():
     say("[OK] application clean complete; toolchain/vendor caches preserved")
 
 
+def insert_before_marker(text, marker, line):
+    if line in text:
+        return text
+    if marker not in text:
+        fail(f"app/main.cpp is missing automation marker: {marker}")
+    return text.replace(marker, f"{line}\n{marker}", 1)
+
+
+def register_module_in_main(rel, node):
+    text = read(MAIN_CPP)
+    header_rel = rel.with_suffix(".hpp").as_posix()
+    text = insert_before_marker(text, INCLUDE_END, f'#include "{header_rel}"')
+    text = insert_before_marker(text, FACTORY_END, f"    nodes.push_back(make_{node}_node());")
+    MAIN_CPP.write_text(text, encoding="utf-8")
+
+
 def create_node(value):
     rel = validate_rel_name(value, ".cpp")
-    path = APP / rel.with_suffix(".cpp")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if path.exists():
-        fail(f"already exists: {path.relative_to(ROOT)}")
+    cpp_path = APP / rel.with_suffix(".cpp")
+    hpp_path = APP / rel.with_suffix(".hpp")
+
+    if cpp_path.exists() or hpp_path.exists():
+        existing = cpp_path if cpp_path.exists() else hpp_path
+        fail(f"already exists: {existing.relative_to(ROOT)}")
+
+    if rel.name in module_map():
+        fail(f"module name must be unique: {rel.name}")
+
+    if not MAIN_CPP.exists():
+        fail("app/main.cpp is missing")
+    main_text = read(MAIN_CPP)
+    for marker in (INCLUDE_END, FACTORY_END):
+        if marker not in main_text:
+            fail(f"app/main.cpp is missing automation marker: {marker}")
+
+    cpp_path.parent.mkdir(parents=True, exist_ok=True)
     node = rel.name
     cls = "".join(part.capitalize() for part in node.split("_")) + "Node"
-    path.write_text(
-        f'''#include <memory>\n\n#include "rclcpp/rclcpp.hpp"\n\nclass {cls} final : public rclcpp::Node\n{{\npublic:\n    {cls}()\n        : rclcpp::Node("{node}")\n    {{\n        RCLCPP_INFO(get_logger(), "{node} started");\n    }}\n}};\n\nint main(int argc, char * argv[])\n{{\n    rclcpp::init(argc, argv);\n    rclcpp::spin(std::make_shared<{cls}>());\n    rclcpp::shutdown();\n    return 0;\n}}\n''',
+    header_rel = rel.with_suffix(".hpp").as_posix()
+
+    hpp_path.write_text(
+        '#pragma once\n\n#include <memory>\n\n#include "rclcpp/rclcpp.hpp"\n\n'
+        f"std::shared_ptr<rclcpp::Node> make_{node}_node();\n",
         encoding="utf-8",
     )
-    say(f"[OK] created {path.relative_to(ROOT)}")
-    say(f"Run: ./dev r {node}")
+
+    cpp_path.write_text(
+        f'''#include <memory>\n\n#include "{header_rel}"\n\nclass {cls} final : public rclcpp::Node\n{{\npublic:\n    {cls}()\n        : rclcpp::Node("{node}")\n    {{\n        RCLCPP_INFO(get_logger(), "{node} started");\n    }}\n}};\n\nstd::shared_ptr<rclcpp::Node> make_{node}_node()\n{{\n    return std::make_shared<{cls}>();\n}}\n''',
+        encoding="utf-8",
+    )
+
+    register_module_in_main(rel, node)
+
+    say(f"[OK] created {cpp_path.relative_to(ROOT)}")
+    say(f"[OK] created {hpp_path.relative_to(ROOT)}")
+    say("[OK] registered module in app/main.cpp")
+    say("Run the full application: ./dev r")
 
 
 def create_header(value):
@@ -243,33 +311,17 @@ def create_header(value):
     say(f"[OK] created {path.relative_to(ROOT)}")
 
 
-def resolve_node(name):
-    nodes = node_map()
-    if "/" in name or name.endswith(".cpp"):
-        rel = validate_rel_name(name, ".cpp")
-        path = APP / rel.with_suffix(".cpp")
-        if not path.exists() or path not in node_files():
-            fail(f"not a node source: {path.relative_to(ROOT)}")
-        return path.stem
-    if name not in nodes:
-        fail(f"unknown node '{name}'. Available: {', '.join(sorted(nodes)) or '(none)'}")
-    return name
-
-
-def run_node(name, extra):
-    target = resolve_node(name)
+def run_app(extra):
     build()
     m = manifest()
     env = bootstrap.ros_environment(m, include_workspace=True)
-    bootstrap.run(["ros2", "run", "drone", target, *extra], env=env)
+    bootstrap.run(["ros2", "run", "drone", ENTRY_EXECUTABLE, *extra], env=env)
 
 
 def list_nodes():
-    nodes = node_map()
-    for name, path in sorted(nodes.items()):
+    say(f"entrypoint             {MAIN_CPP.relative_to(ROOT)} -> {ENTRY_EXECUTABLE}")
+    for name, path in sorted(module_map().items()):
         say(f"{name:<22} {path.relative_to(ROOT)}")
-    if not nodes:
-        say("No nodes yet.")
 
 
 def fmt():
@@ -287,7 +339,8 @@ def check():
         result = subprocess.run([sys.executable, "-m", "py_compile", str(script)], check=False)
         if result.returncode:
             fail(f"syntax check failed: {script.relative_to(ROOT)}")
-    say(f"[OK] {len(node_map())} node(s) discovered")
+    say(f"[OK] single entrypoint: {MAIN_CPP.relative_to(ROOT)}")
+    say(f"[OK] {len(module_map())} module(s) linked into {ENTRY_EXECUTABLE}")
     say("[OK] automation syntax/project checks passed")
 
 
@@ -308,15 +361,20 @@ def help_text():
   ./dev verify                verify exact compatibility contract
   ./dev b | build             incremental application build
   ./dev rb | rebuild          application clean + build
-  ./dev r NODE [args...]      build + run a node
-  ./dev n PATH                create node (folders are optional)
-  ./dev h PATH                create header
-  ./dev ls | list             list discovered nodes
+  ./dev r [ROS args...]       build + run the complete app/main.cpp system
+  ./dev n PATH                create + auto-register a node module
+  ./dev h PATH                create a generic header
+  ./dev ls | list             show the single entrypoint + linked modules
   ./dev d PKG                 add ROS dependency + build
   ./dev fmt                   install clang-format if needed + format code
-  ./dev check                 project + Python automation checks
+  ./dev check                 validate single-entry project + automation syntax
   ./dev clean                 remove only application build artifacts
   ./dev shell                 open ROS/workspace-ready shell
+
+Architecture:
+  app/main.cpp is the only process entry point.
+  Node .cpp files expose make_<name>_node() factories and are linked into drone_lib.
+  ./dev n automatically adds new modules to app/main.cpp.
 
 The pinned compatibility contract is toolchain.json.
 External sources/dependencies live under .workspace/ and are never committed.
@@ -342,18 +400,20 @@ def main():
     elif cmd in {"rb", "rebuild"}:
         clean(); build()
     elif cmd in {"r", "run"}:
-        if not rest: fail("Usage: ./dev r NODE [args...]")
-        run_node(rest[0], rest[1:])
+        run_app(rest)
     elif cmd in {"n", "node"}:
-        if len(rest) != 1: fail("Usage: ./dev n PATH")
+        if len(rest) != 1:
+            fail("Usage: ./dev n PATH")
         create_node(rest[0])
     elif cmd in {"h", "header"}:
-        if len(rest) != 1: fail("Usage: ./dev h PATH")
+        if len(rest) != 1:
+            fail("Usage: ./dev h PATH")
         create_header(rest[0])
     elif cmd in {"ls", "list"}:
         list_nodes()
     elif cmd in {"d", "dep"}:
-        if len(rest) != 1: fail("Usage: ./dev d PACKAGE")
+        if len(rest) != 1:
+            fail("Usage: ./dev d PACKAGE")
         add_dep(rest[0]); build()
     elif cmd == "fmt":
         fmt()
