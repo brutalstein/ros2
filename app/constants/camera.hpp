@@ -2,14 +2,19 @@
 
 namespace camera
 {
-    // ROS tarafında kullanacağımız görüntü kanalı
+    // ROS tarafında kullanacağımız sabit kamera API'si.
+    // Gazebo'nun uzun ve instance'a bağlı topic adları otomasyon tarafından
+    // bu iki isme remap edilir.
     inline constexpr const char IMAGE_TOPIC[] =
         "/camera/image_raw";
+
+    inline constexpr const char INFO_TOPIC[] =
+        "/camera/camera_info";
 
     inline constexpr const char FRAME_ID[] =
         "camera_optical_frame";
 
-    // Görüntü
+    // Hedef kamera profili
     inline constexpr int WIDTH = 1280;
     inline constexpr int HEIGHT = 720;
     inline constexpr int FPS = 30;
