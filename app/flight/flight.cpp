@@ -1,68 +1,32 @@
-#include <chrono>
 #include <memory>
 
 #include "flight/flight.hpp"
-#include "constants/topics.hpp"
-
-#include "px4_msgs/msg/offboard_control_mode.hpp"
-
-
-using namespace std::chrono_literals;
-
+#include "flight/control/offboard_controller.hpp"
+#include "flight/publisher/publisher.hpp"
+#include "flight/state/flight_state.hpp"
+#include "flight/subscription/subscription.hpp"
 
 class FlightNode final : public rclcpp::Node
 {
 public:
     FlightNode()
-        : rclcpp::Node("flight")
+        : rclcpp::Node("flight"),
+          state_{},
+          publisher_(*this),
+          subscription_(*this, state_),
+          controller_(*this, state_, publisher_)
     {
-        offboard_control_mode_pub_ =
-            create_publisher<px4_msgs::msg::OffboardControlMode>(
-                topics::PX4_OFFBOARD_CONTROL_MODE,
-                10);
-
-        heartbeat_timer_ =
-            create_wall_timer(
-                100ms,
-                [this]()
-                {
-                    publish_offboard_heartbeat();
-                });
-
         RCLCPP_INFO(
             get_logger(),
-            "flight started | safe heartbeat only");
+            "flight started | waiting for safe offboard entry");
     }
-
 
 private:
-    rclcpp::Publisher<
-        px4_msgs::msg::OffboardControlMode>::SharedPtr
-        offboard_control_mode_pub_;
-
-    rclcpp::TimerBase::SharedPtr heartbeat_timer_;
-
-
-    void publish_offboard_heartbeat()
-    {
-        px4_msgs::msg::OffboardControlMode msg{};
-
-        msg.timestamp =
-            static_cast<uint64_t>(
-                get_clock()->now().nanoseconds() / 1000);
-
-        msg.position = true;
-        msg.velocity = false;
-        msg.acceleration = false;
-        msg.attitude = false;
-        msg.body_rate = false;
-        msg.thrust_and_torque = false;
-        msg.direct_actuator = false;
-
-        offboard_control_mode_pub_->publish(msg);
-    }
+    FlightState state_;
+    FlightPublisher publisher_;
+    FlightSubscription subscription_;
+    OffboardController controller_;
 };
-
 
 std::shared_ptr<rclcpp::Node> make_flight_node()
 {
