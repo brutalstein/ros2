@@ -12,13 +12,17 @@
     "ros": {
       "distro": "jazzy",
       "apt_source_version": "1.2.0",
-      "apt_packages": ["ros-jazzy-ros-base", "ros-dev-tools"]
+      "apt_packages": [
+        "ros-jazzy-ros-base",
+        "ros-dev-tools",
+        "ros-jazzy-ros-gz"
+      ]
     },
     "px4": {
       "repo": "https://github.com/PX4/PX4-Autopilot.git",
       "ref": "v1.17.0",
       "messages_ref": "release/1.17",
-      "sim_target": "gz_x500"
+      "sim_target": "gz_x500_mono_cam"
     },
     "px4_msgs": {
       "repo": "https://github.com/PX4/px4_msgs.git",
@@ -32,6 +36,21 @@
     "gazebo": {
       "family": "Harmonic",
       "expected_major": 8
+    },
+    "camera_bridge": {
+      "enabled": true,
+      "ros_package": "ros_gz_bridge",
+      "targets": [
+        "gz_x500_mono_cam",
+        "gz_x500_mono_cam_down"
+      ],
+      "gazebo_image_suffix": "/link/camera_link/sensor/imager/image",
+      "gazebo_info_suffix": "/link/camera_link/sensor/imager/camera_info",
+      "ros_image_topic": "/camera/image_raw",
+      "ros_info_topic": "/camera/camera_info",
+      "bridge_camera_info": true,
+      "startup_timeout_seconds": 30,
+      "bridge_timeout_seconds": 12
     }
   },
   "vscode": {

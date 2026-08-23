@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 import bootstrap  # noqa: E402
+import drone  # noqa: E402
 
 
 class ToolchainContractTests(unittest.TestCase):
@@ -21,6 +22,31 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertEqual(stack["px4_msgs"]["ref"], "release/1.17")
         self.assertEqual(stack["micro_xrce_dds_agent"]["ref"], "v2.4.3")
         self.assertEqual(stack["gazebo"]["expected_major"], 8)
+
+    def test_camera_runtime_contract(self):
+        stack = self.manifest["stack"]
+        camera = stack["camera_bridge"]
+        self.assertEqual(stack["px4"]["sim_target"], "gz_x500_mono_cam")
+        self.assertIn("ros-jazzy-ros-gz", stack["ros"]["apt_packages"])
+        self.assertEqual(camera["ros_package"], "ros_gz_bridge")
+        self.assertEqual(camera["ros_image_topic"], "/camera/image_raw")
+        self.assertEqual(camera["ros_info_topic"], "/camera/camera_info")
+        self.assertIn("gz_x500_mono_cam", camera["targets"])
+
+    def test_camera_topic_discovery_is_instance_agnostic(self):
+        camera = self.manifest["stack"]["camera_bridge"]
+        topics = [
+            "/world/default/model/other_0/link/camera_link/sensor/imager/image",
+            "/world/default/model/x500_mono_cam_12/link/camera_link/sensor/imager/camera_info",
+            "/world/default/model/x500_mono_cam_12/link/camera_link/sensor/imager/image",
+        ]
+        image, info = drone.select_camera_topics(
+            topics,
+            camera,
+            preferred_model="gz_x500_mono_cam",
+        )
+        self.assertIn("x500_mono_cam_12", image)
+        self.assertTrue(info.endswith("/camera_info"))
 
     def test_supported_wsl2_profile(self):
         info = {
