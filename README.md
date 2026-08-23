@@ -39,6 +39,14 @@ The PX4/ROS bridge pairing follows PX4's supported Jazzy configuration. External
 
 Existing compatible clean `~/PX4-Autopilot` or `PX4_AUTOPILOT_DIR` checkouts are reused. Otherwise a clean pinned PX4 checkout is created under `.workspace/vendor/`. Dirty or incompatible external PX4 trees are never rewritten by the automation.
 
+## Perception and autonomy foundation
+
+The toolchain also pre-installs a deliberately small foundation for the next autonomy layers instead of waiting for each first compile to fail. `./dev setup` guarantees the camera/image path (`sensor_msgs`, `cv_bridge`, `image_transport`, `image_geometry`), time synchronization (`message_filters`), standard detection messages (`vision_msgs`), geometry/navigation messages, TF2 transforms, OpenCV 4 development libraries and Eigen3.
+
+These dependencies cover the expected camera → OpenCV → perception → coordinate transform → planning pipeline without choosing a heavyweight inference runtime yet. CUDA-specific ML stacks such as TensorRT or ONNX Runtime are intentionally not pinned here; they will be added only when the inference architecture is chosen so the project does not create avoidable CUDA/version conflicts.
+
+OpenCV and Eigen are wired into the shared CMake build baseline, so new C++ nodes can use them without hand-editing CMake. ROS dependencies used by source files are still declared normally in `package.xml` and the development automation continues to discover ROS include dependencies automatically.
+
 ## Daily workflow
 
 ```bash
@@ -170,4 +178,4 @@ The automation checks the recommended C++, CMake, ROS and Remote-WSL extensions.
 
 The bootstrap is intentionally conservative: it refuses unsupported OS profiles, does not overwrite dirty third-party repositories, does not silently switch incompatible PX4 versions, does not install Linux NVIDIA drivers inside WSL, and does not SIGKILL runtime processes as a normal shutdown path.
 
-CI validates the compatibility manifest, camera runtime contract, dynamic camera-topic selection, platform resolver, portable paths, Python syntax, shell syntax and the absence of generated Python bytecode on every push/PR.
+CI validates the compatibility manifest, camera runtime contract, perception dependency baseline, dynamic camera-topic selection, platform resolver, portable paths, Python syntax, shell syntax and the absence of generated Python bytecode on every push/PR.

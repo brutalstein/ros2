@@ -8,6 +8,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
 
+# Foundational C++ libraries used by camera/perception/planning code.
+find_package(OpenCV 4 REQUIRED)
+find_package(Eigen3 REQUIRED)
+
 # Keep the project flat and modular: C++ can live anywhere under app/.
 file(GLOB_RECURSE DRONE_CPP
   CONFIGURE_DEPENDS
@@ -40,7 +44,14 @@ endforeach()
 # .cpp files without main() become one shared internal library.
 if(DRONE_LIBRARY_SOURCES)
   ament_auto_add_library(drone_lib SHARED ${DRONE_LIBRARY_SOURCES})
-  target_include_directories(drone_lib PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_include_directories(drone_lib PUBLIC
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    ${OpenCV_INCLUDE_DIRS}
+  )
+  target_link_libraries(drone_lib PUBLIC
+    ${OpenCV_LIBS}
+    Eigen3::Eigen
+  )
   target_compile_options(drone_lib PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
@@ -56,11 +67,18 @@ foreach(source IN LISTS DRONE_NODE_SOURCES)
   endif()
 
   ament_auto_add_executable("${node}" "${source}")
-  target_include_directories("${node}" PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+  target_include_directories("${node}" PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}"
+    ${OpenCV_INCLUDE_DIRS}
+  )
+  target_link_libraries("${node}" PRIVATE
+    ${OpenCV_LIBS}
+    Eigen3::Eigen
+  )
   target_compile_options("${node}" PRIVATE -Wall -Wextra -Wpedantic)
 
   if(TARGET drone_lib)
-    target_link_libraries("${node}" drone_lib)
+    target_link_libraries("${node}" PRIVATE drone_lib)
   endif()
 endforeach()
 

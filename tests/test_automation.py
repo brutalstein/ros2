@@ -33,6 +33,36 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertEqual(camera["ros_info_topic"], "/camera/camera_info")
         self.assertIn("gz_x500_mono_cam", camera["targets"])
 
+    def test_perception_foundation_contract(self):
+        packages = set(self.manifest["stack"]["ros"]["apt_packages"])
+        expected = {
+            "ros-jazzy-sensor-msgs",
+            "ros-jazzy-cv-bridge",
+            "ros-jazzy-image-transport",
+            "ros-jazzy-image-geometry",
+            "ros-jazzy-message-filters",
+            "ros-jazzy-vision-msgs",
+            "ros-jazzy-geometry-msgs",
+            "ros-jazzy-nav-msgs",
+            "ros-jazzy-tf2-ros",
+            "ros-jazzy-tf2-geometry-msgs",
+            "ros-jazzy-tf2-eigen",
+            "libopencv-dev",
+            "libeigen3-dev",
+        }
+        self.assertTrue(expected.issubset(packages))
+
+    def test_app_declares_camera_dependencies(self):
+        package_xml = (ROOT / "app" / "package.xml").read_text(encoding="utf-8")
+        self.assertIn("<depend>sensor_msgs</depend>", package_xml)
+        self.assertIn("<depend>cv_bridge</depend>", package_xml)
+
+    def test_cpp_foundation_is_wired_into_cmake(self):
+        cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn("find_package(OpenCV 4 REQUIRED)", cmake)
+        self.assertIn("find_package(Eigen3 REQUIRED)", cmake)
+        self.assertIn("Eigen3::Eigen", cmake)
+
     def test_camera_topic_discovery_is_instance_agnostic(self):
         camera = self.manifest["stack"]["camera_bridge"]
         topics = [
