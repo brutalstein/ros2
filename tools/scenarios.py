@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -10,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "simulation" / "scenarios.json"
 STATE_DIR = ROOT / ".workspace" / "runtime"
 SELECTED = STATE_DIR / "scenario.txt"
+PX4_STATE = STATE_DIR / "px4.json"
 
 
 def fail(message: str) -> None:
@@ -54,6 +56,16 @@ def validate_world(config: dict, name: str) -> Path:
     return path
 
 
+def px4_running() -> bool:
+    try:
+        state = json.loads(PX4_STATE.read_text(encoding="utf-8"))
+        pid = int(state["pid"])
+        os.kill(pid, 0)
+        return True
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return False
+
+
 def current_name(config: dict) -> str:
     try:
         selected = SELECTED.read_text(encoding="utf-8").strip()
@@ -85,6 +97,8 @@ def list_scenarios() -> None:
 def select(name: str) -> None:
     config = load_config()
     path = validate_world(config, name)
+    if px4_running():
+        fail("PX4/Gazebo is running. Run ./drone stop before changing scenario")
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     SELECTED.write_text(name + "\n", encoding="utf-8")
     print(f"[OK] selected scenario: {name}")
@@ -94,6 +108,8 @@ def select(name: str) -> None:
 
 def reset() -> None:
     config = load_config()
+    if px4_running():
+        fail("PX4/Gazebo is running. Run ./drone stop before changing scenario")
     try:
         SELECTED.unlink()
     except FileNotFoundError:
@@ -113,6 +129,13 @@ def print_current(name_only: bool = False) -> None:
     print(f"World   : {world_path(config, name).relative_to(ROOT)}")
 
 
+def is_known(name: str) -> None:
+    config = load_config()
+    if name not in config["scenarios"]:
+        raise SystemExit(1)
+    validate_world(config, name)
+
+
 def main() -> None:
     args = sys.argv[1:]
     command = args[0] if args else "list"
@@ -126,6 +149,10 @@ def main() -> None:
         reset()
     elif command == "current":
         print_current("--name-only" in args[1:])
+    elif command == "is-known":
+        if len(args) != 2:
+            raise SystemExit(1)
+        is_known(args[1])
     else:
         fail(f"unknown scenario command: {command}")
 
