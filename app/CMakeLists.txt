@@ -17,6 +17,9 @@ if(NOT EXISTS "${DRONE_ENTRYPOINT}")
   message(FATAL_ERROR "Single application entry point is missing: app/main.cpp")
 endif()
 
+# Discover every C++ implementation file recursively. Node sources and ordinary
+# helper sources are compiled into the same application library. The only
+# special source is app/main.cpp, which owns process startup.
 file(GLOB_RECURSE DRONE_CPP
   CONFIGURE_DEPENDS
   LIST_DIRECTORIES false
@@ -29,40 +32,15 @@ set(DRONE_LIBRARY_SOURCES ${DRONE_CPP})
 list(REMOVE_ITEM DRONE_LIBRARY_SOURCES "${DRONE_ENTRYPOINT}")
 list(SORT DRONE_LIBRARY_SOURCES)
 
+# Keep the single-entrypoint rule even when users bypass ./dev and invoke
+# colcon/CMake directly. Helper files do not need node factories.
 foreach(source IN LISTS DRONE_LIBRARY_SOURCES)
   file(READ "${source}" source_text)
   string(REGEX MATCH "(^|[\r\n])[ \t]*int[ \t\r\n]+main[ \t\r\n]*\\(" has_main "${source_text}")
   if(has_main)
     file(RELATIVE_PATH relative_source "${CMAKE_CURRENT_SOURCE_DIR}" "${source}")
     message(FATAL_ERROR
-      "Only app/main.cpp may define main(). Remove main() from ${relative_source} "
-      "and expose a node factory instead."
-    )
-  endif()
-
-  file(RELATIVE_PATH relative_source "${CMAKE_CURRENT_SOURCE_DIR}" "${source}")
-  get_filename_component(relative_dir "${relative_source}" DIRECTORY)
-  get_filename_component(module_name "${source}" NAME_WE)
-
-  if(relative_dir STREQUAL "")
-    set(module_header "${module_name}.hpp")
-  else()
-    set(module_header "${relative_dir}/${module_name}.hpp")
-  endif()
-
-  set(module_header_abs "${CMAKE_CURRENT_SOURCE_DIR}/${module_header}")
-  if(NOT EXISTS "${module_header_abs}")
-    message(FATAL_ERROR
-      "Module ${relative_source} needs matching header ${module_header} "
-      "with make_${module_name}_node()."
-    )
-  endif()
-
-  file(READ "${module_header_abs}" header_text)
-  string(REGEX MATCH "make_${module_name}_node[ \t\r\n]*\\(" has_factory "${header_text}")
-  if(NOT has_factory)
-    message(FATAL_ERROR
-      "Module header ${module_header} must declare make_${module_name}_node()."
+      "Only app/main.cpp may define main(). Remove main() from ${relative_source}."
     )
   endif()
 endforeach()
