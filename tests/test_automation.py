@@ -63,6 +63,11 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertIn("find_package(Eigen3 REQUIRED)", cmake)
         self.assertIn("Eigen3::Eigen", cmake)
 
+    def test_ament_auto_targets_keep_plain_link_signature(self):
+        cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertNotIn('target_link_libraries("${node}" PRIVATE', cmake)
+        self.assertNotIn("target_link_libraries(drone_lib PUBLIC", cmake)
+
     def test_camera_topic_discovery_is_instance_agnostic(self):
         camera = self.manifest["stack"]["camera_bridge"]
         topics = [
