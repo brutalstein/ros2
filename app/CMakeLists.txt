@@ -48,7 +48,11 @@ if(DRONE_LIBRARY_SOURCES)
     "${CMAKE_CURRENT_SOURCE_DIR}"
     ${OpenCV_INCLUDE_DIRS}
   )
-  target_link_libraries(drone_lib PUBLIC
+
+  # ament_cmake_auto / ament_target_dependencies uses the plain
+  # target_link_libraries signature. CMake forbids mixing plain and keyword
+  # signatures on the same target, so keep all link calls plain here too.
+  target_link_libraries(drone_lib
     ${OpenCV_LIBS}
     Eigen3::Eigen
   )
@@ -71,14 +75,14 @@ foreach(source IN LISTS DRONE_NODE_SOURCES)
     "${CMAKE_CURRENT_SOURCE_DIR}"
     ${OpenCV_INCLUDE_DIRS}
   )
-  target_link_libraries("${node}" PRIVATE
+  target_link_libraries("${node}"
     ${OpenCV_LIBS}
     Eigen3::Eigen
   )
   target_compile_options("${node}" PRIVATE -Wall -Wextra -Wpedantic)
 
   if(TARGET drone_lib)
-    target_link_libraries("${node}" PRIVATE drone_lib)
+    target_link_libraries("${node}" drone_lib)
   endif()
 endforeach()
 
