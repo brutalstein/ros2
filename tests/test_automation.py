@@ -71,56 +71,37 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertNotIn('target_link_libraries("${node}" PRIVATE', cmake)
         self.assertNotIn("target_link_libraries(drone_lib PUBLIC", cmake)
 
-    def test_single_application_entrypoint_contract(self):
-        cpp_files = sorted((ROOT / "app").rglob("*.cpp"))
-        mains = [path for path in cpp_files if dev.MAIN_RE.search(path.read_text(encoding="utf-8"))]
-        self.assertEqual(mains, [ROOT / "app" / "main.cpp"])
+    def test_single_application_entrypoint_automation_contract(self):
+        cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
+        dev_text = (ROOT / "tools" / "dev.py").read_text(encoding="utf-8")
 
-        main_cpp = (ROOT / "app" / "main.cpp").read_text(encoding="utf-8")
+        self.assertIn('set(DRONE_ENTRYPOINT "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")', cmake)
+        self.assertIn("Only app/main.cpp may define main()", cmake)
+        self.assertIn("ament_auto_add_executable(drone_app", cmake)
+
+        self.assertEqual(dev.MAIN_CPP, ROOT / "app" / "main.cpp")
+        self.assertEqual(dev.ENTRY_EXECUTABLE, "drone_app")
+        self.assertIn("register_module_in_main", dev_text)
+        self.assertIn("make_{node}_node", dev_text)
+        self.assertIn("run_app(rest)", dev_text)
+
         for marker in (
             dev.INCLUDE_BEGIN,
             dev.INCLUDE_END,
             dev.FACTORY_BEGIN,
             dev.FACTORY_END,
         ):
-            self.assertIn(marker, main_cpp)
+            self.assertTrue(marker.startswith("// DRONE_NODE_"))
 
-        for factory in (
-            "make_core_node()",
-            "make_state_node()",
-            "make_sensors_node()",
-            "make_camera_node()",
-            "make_flight_node()",
-        ):
-            self.assertIn(factory, main_cpp)
+    def test_main_and_flight_are_intentionally_left_for_manual_implementation(self):
+        self.assertFalse((ROOT / "app" / "main.cpp").exists())
+        self.assertFalse((ROOT / "app" / "flight" / "flight.cpp").exists())
+        self.assertFalse((ROOT / "app" / "flight" / "flight.hpp").exists())
 
-        cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
-        self.assertIn("Only app/main.cpp may define main()", cmake)
-        self.assertIn("ament_auto_add_executable(drone_app", cmake)
-
-    def test_dev_creates_factory_modules_not_extra_entrypoints(self):
-        dev_text = (ROOT / "tools" / "dev.py").read_text(encoding="utf-8")
-        self.assertIn("register_module_in_main", dev_text)
-        self.assertIn("make_{node}_node", dev_text)
-        self.assertIn('ENTRY_EXECUTABLE = "drone_app"', dev_text)
-        self.assertIn("run_app(rest)", dev_text)
-
-    def test_offboard_takeoff_contract(self):
         topics = (ROOT / "app" / "constants" / "topics.hpp").read_text(encoding="utf-8")
-        self.assertIn('"/fmu/in/offboard_control_mode"', topics)
-        self.assertIn('"/fmu/in/trajectory_setpoint"', topics)
-        self.assertIn('"/fmu/in/vehicle_command"', topics)
-
-        flight = (ROOT / "app" / "flight" / "flight.cpp").read_text(encoding="utf-8")
-        self.assertIn('declare_parameter<bool>("auto_takeoff", true)', flight)
-        self.assertIn('declare_parameter<double>("takeoff_altitude_m", 3.0)', flight)
-        self.assertIn("create_wall_timer(100ms", flight)
-        self.assertIn("PRIME_CYCLES_REQUIRED = 20", flight)
-        self.assertIn("VEHICLE_CMD_DO_SET_MODE", flight)
-        self.assertIn("VEHICLE_CMD_COMPONENT_ARM_DISARM", flight)
-        self.assertIn("NAVIGATION_STATE_OFFBOARD", flight)
-        self.assertIn("pre_flight_checks_pass", flight)
-        self.assertNotIn("21196", flight)  # Never force-arm by bypassing PX4 health checks.
+        self.assertNotIn("/fmu/in/offboard_control_mode", topics)
+        self.assertNotIn("/fmu/in/trajectory_setpoint", topics)
+        self.assertNotIn("/fmu/in/vehicle_command", topics)
 
     def test_scenario_world_contract(self):
         config_path = ROOT / "simulation" / "scenarios.json"
