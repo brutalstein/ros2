@@ -17,8 +17,6 @@ if(NOT EXISTS "${DRONE_ENTRYPOINT}")
   message(FATAL_ERROR "Single application entry point is missing: app/main.cpp")
 endif()
 
-# Every implementation file except app/main.cpp belongs to the shared internal
-# library. This makes main.cpp the only process entry point for the application.
 file(GLOB_RECURSE DRONE_CPP
   CONFIGURE_DEPENDS
   LIST_DIRECTORIES false
@@ -29,9 +27,18 @@ file(GLOB_RECURSE DRONE_CPP
 
 set(DRONE_LIBRARY_SOURCES ${DRONE_CPP})
 list(REMOVE_ITEM DRONE_LIBRARY_SOURCES "${DRONE_ENTRYPOINT}")
+list(SORT DRONE_LIBRARY_SOURCES)
 
-# Reject accidental extra main() functions immediately. Nodes are modules now;
-# only app/main.cpp is allowed to own process startup/shutdown.
+set(DRONE_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(DRONE_REGISTRY_SOURCE "${DRONE_GENERATED_DIR}/node_registry.cpp")
+file(MAKE_DIRECTORY "${DRONE_GENERATED_DIR}")
+
+file(WRITE "${DRONE_REGISTRY_SOURCE}"
+  "#include \"runtime/node_registry.hpp\"\n"
+)
+
+set(DRONE_FACTORY_CALLS "")
+
 foreach(source IN LISTS DRONE_LIBRARY_SOURCES)
   file(READ "${source}" source_text)
   string(REGEX MATCH "(^|[\r\n])[ \t]*int[ \t\r\n]+main[ \t\r\n]*\\(" has_main "${source_text}")
@@ -42,9 +49,55 @@ foreach(source IN LISTS DRONE_LIBRARY_SOURCES)
       "and expose a node factory instead."
     )
   endif()
+
+  file(RELATIVE_PATH relative_source "${CMAKE_CURRENT_SOURCE_DIR}" "${source}")
+  get_filename_component(relative_dir "${relative_source}" DIRECTORY)
+  get_filename_component(module_name "${source}" NAME_WE)
+
+  if(relative_dir STREQUAL "")
+    set(module_header "${module_name}.hpp")
+  else()
+    set(module_header "${relative_dir}/${module_name}.hpp")
+  endif()
+
+  set(module_header_abs "${CMAKE_CURRENT_SOURCE_DIR}/${module_header}")
+  if(NOT EXISTS "${module_header_abs}")
+    message(FATAL_ERROR
+      "Module ${relative_source} needs matching header ${module_header} "
+      "with make_${module_name}_node()."
+    )
+  endif()
+
+  file(READ "${module_header_abs}" header_text)
+  string(REGEX MATCH "make_${module_name}_node[ \t\r\n]*\\(" has_factory "${header_text}")
+  if(NOT has_factory)
+    message(FATAL_ERROR
+      "Module header ${module_header} must declare make_${module_name}_node()."
+    )
+  endif()
+
+  file(APPEND "${DRONE_REGISTRY_SOURCE}" "#include \"${module_header}\"\n")
+  string(APPEND DRONE_FACTORY_CALLS
+    "    nodes.push_back(make_${module_name}_node());\n"
+  )
 endforeach()
 
-ament_auto_add_library(drone_lib SHARED ${DRONE_LIBRARY_SOURCES})
+file(APPEND "${DRONE_REGISTRY_SOURCE}"
+  "\nnamespace drone_runtime\n"
+  "{\n"
+  "std::vector<std::shared_ptr<rclcpp::Node>> make_nodes()\n"
+  "{\n"
+  "    std::vector<std::shared_ptr<rclcpp::Node>> nodes;\n"
+  "${DRONE_FACTORY_CALLS}"
+  "    return nodes;\n"
+  "}\n"
+  "}\n"
+)
+
+ament_auto_add_library(drone_lib SHARED
+  ${DRONE_LIBRARY_SOURCES}
+  "${DRONE_REGISTRY_SOURCE}"
+)
 target_include_directories(drone_lib PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   ${OpenCV_INCLUDE_DIRS}
