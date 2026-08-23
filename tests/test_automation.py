@@ -78,16 +78,21 @@ class ToolchainContractTests(unittest.TestCase):
 
         self.assertIn('set(DRONE_ENTRYPOINT "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")', cmake)
         self.assertIn("Only app/main.cpp may define main()", cmake)
+        self.assertIn("file(GLOB_RECURSE DRONE_CPP", cmake)
+        self.assertIn("CONFIGURE_DEPENDS", cmake)
+        self.assertIn("set(DRONE_LIBRARY_SOURCES ${DRONE_CPP})", cmake)
         self.assertIn("ament_auto_add_executable(drone_app", cmake)
         self.assertNotIn("DRONE_REGISTRY_SOURCE", cmake)
         self.assertNotIn("DRONE_FACTORY_CALLS", cmake)
         self.assertNotIn("file(WRITE", cmake)
         self.assertNotIn("generated/node_registry.cpp", cmake)
-        self.assertIn("make_${module_name}_node", cmake)
+        self.assertNotIn("module_header_abs", cmake)
 
         self.assertEqual(dev.MAIN_CPP, ROOT / "app" / "main.cpp")
         self.assertEqual(dev.ENTRY_EXECUTABLE, "drone_app")
-        self.assertIn("validate_module_contract", dev_text)
+        self.assertIn("def source_kind", dev_text)
+        self.assertIn("def helper_files", dev_text)
+        self.assertIn("def create_component", dev_text)
         self.assertIn("make_{node}_node", dev_text)
         self.assertIn("run_app(rest)", dev_text)
         self.assertNotIn("register_module_in_main", dev_text)
@@ -104,21 +109,35 @@ class ToolchainContractTests(unittest.TestCase):
         for module in ("core", "state", "sensors", "camera"):
             path = ROOT / "app" / module / f"{module}.cpp"
             self.assertEqual(dev.validate_module_contract(path), [])
+            self.assertEqual(dev.source_kind(path), "node")
 
-    def test_main_is_user_owned_and_flight_is_still_manual(self):
+    def test_node_and_helper_source_classification(self):
+        core = ROOT / "app" / "core" / "core.cpp"
+        nested_helper = ROOT / "app" / "flight" / "publisher" / "publisher.cpp"
+
+        self.assertEqual(dev.source_kind(core), "node")
+        self.assertEqual(dev.source_kind(nested_helper), "helper")
+        self.assertNotIn(nested_helper, dev.node_files())
+
+    def test_main_is_user_owned_and_application_code_is_not_generated(self):
         main = (ROOT / "app" / "main.cpp").read_text(encoding="utf-8")
+        dev_text = (ROOT / "tools" / "dev.py").read_text(encoding="utf-8")
+
         self.assertIn("int main", main)
         self.assertIn("drone_runtime::make_nodes()", main)
         self.assertNotIn("DRONE_NODE_INCLUDES", main)
         self.assertNotIn("DRONE_NODE_FACTORIES", main)
+        self.assertIn("app/runtime/node_registry.hpp is user-owned", dev_text)
+        self.assertIn("The automation never generates make_nodes()", dev_text)
 
-        self.assertFalse((ROOT / "app" / "flight" / "flight.cpp").exists())
-        self.assertFalse((ROOT / "app" / "flight" / "flight.hpp").exists())
+    def test_vscode_compile_database_contract(self):
+        settings = (ROOT / ".vscode" / "settings.json").read_text(encoding="utf-8")
+        dev_text = (ROOT / "tools" / "dev.py").read_text(encoding="utf-8")
 
-        topics = (ROOT / "app" / "constants" / "topics.hpp").read_text(encoding="utf-8")
-        self.assertNotIn("/fmu/in/offboard_control_mode", topics)
-        self.assertNotIn("/fmu/in/trajectory_setpoint", topics)
-        self.assertNotIn("/fmu/in/vehicle_command", topics)
+        self.assertIn("${workspaceFolder}/.workspace/compile_commands.json", settings)
+        self.assertIn("CMAKE_EXPORT_COMPILE_COMMANDS=ON", dev_text)
+        self.assertIn("refresh_compile_commands()", dev_text)
+        self.assertIn("finally:", dev_text)
 
     def test_scenario_world_contract(self):
         config_path = ROOT / "simulation" / "scenarios.json"
