@@ -292,7 +292,8 @@ def create_node(value):
 
     say(f"[OK] created {cpp_path.relative_to(ROOT)}")
     say(f"[OK] created {hpp_path.relative_to(ROOT)}")
-    say("[OK] module will be discovered automatically at CMake configure time")
+    say("[OK] module source will be linked automatically by CMake")
+    say(f"[ACTION] register make_{node}_node() manually in app/runtime/node_registry.hpp")
     say("No app/main.cpp edit is required.")
 
 
@@ -335,7 +336,7 @@ def check():
         if result.returncode:
             fail(f"syntax check failed: {script.relative_to(ROOT)}")
     say(f"[OK] single entrypoint: {MAIN_CPP.relative_to(ROOT)}")
-    say(f"[OK] {len(module_map())} module(s) satisfy markerless registry contract")
+    say(f"[OK] {len(module_map())} module(s) satisfy manual registry contract")
     say("[OK] automation syntax/project checks passed")
 
 
@@ -357,7 +358,7 @@ def help_text():
   ./dev b | build             incremental application build
   ./dev rb | rebuild          application clean + build
   ./dev r [ROS args...]       build + run the complete app/main.cpp system
-  ./dev n PATH                create an auto-discovered node module
+  ./dev n PATH                create a node module
   ./dev h PATH                create a generic header
   ./dev ls | list             show entrypoint + discovered modules
   ./dev d PKG                 add ROS dependency + build
@@ -369,8 +370,9 @@ def help_text():
 Architecture:
   app/main.cpp is the only process entry point.
   Node .cpp files expose make_<name>_node() factories in matching .hpp files.
-  CMake discovers modules and generates the registry implementation automatically.
-  The automation never inserts marker comments or edits app/main.cpp.
+  CMake discovers and links module source files automatically.
+  app/runtime/node_registry.hpp is user-owned and registers which nodes run.
+  The automation never generates make_nodes(), inserts marker comments, or edits app/main.cpp.
 
 The pinned compatibility contract is toolchain.json.
 External sources/dependencies live under .workspace/ and are never committed.

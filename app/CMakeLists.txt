@@ -29,16 +29,6 @@ set(DRONE_LIBRARY_SOURCES ${DRONE_CPP})
 list(REMOVE_ITEM DRONE_LIBRARY_SOURCES "${DRONE_ENTRYPOINT}")
 list(SORT DRONE_LIBRARY_SOURCES)
 
-set(DRONE_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated")
-set(DRONE_REGISTRY_SOURCE "${DRONE_GENERATED_DIR}/node_registry.cpp")
-file(MAKE_DIRECTORY "${DRONE_GENERATED_DIR}")
-
-file(WRITE "${DRONE_REGISTRY_SOURCE}"
-  "#include \"runtime/node_registry.hpp\"\n"
-)
-
-set(DRONE_FACTORY_CALLS "")
-
 foreach(source IN LISTS DRONE_LIBRARY_SOURCES)
   file(READ "${source}" source_text)
   string(REGEX MATCH "(^|[\r\n])[ \t]*int[ \t\r\n]+main[ \t\r\n]*\\(" has_main "${source_text}")
@@ -75,29 +65,9 @@ foreach(source IN LISTS DRONE_LIBRARY_SOURCES)
       "Module header ${module_header} must declare make_${module_name}_node()."
     )
   endif()
-
-  file(APPEND "${DRONE_REGISTRY_SOURCE}" "#include \"${module_header}\"\n")
-  string(APPEND DRONE_FACTORY_CALLS
-    "    nodes.push_back(make_${module_name}_node());\n"
-  )
 endforeach()
 
-file(APPEND "${DRONE_REGISTRY_SOURCE}"
-  "\nnamespace drone_runtime\n"
-  "{\n"
-  "std::vector<std::shared_ptr<rclcpp::Node>> make_nodes()\n"
-  "{\n"
-  "    std::vector<std::shared_ptr<rclcpp::Node>> nodes;\n"
-  "${DRONE_FACTORY_CALLS}"
-  "    return nodes;\n"
-  "}\n"
-  "}\n"
-)
-
-ament_auto_add_library(drone_lib SHARED
-  ${DRONE_LIBRARY_SOURCES}
-  "${DRONE_REGISTRY_SOURCE}"
-)
+ament_auto_add_library(drone_lib SHARED ${DRONE_LIBRARY_SOURCES})
 target_include_directories(drone_lib PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   ${OpenCV_INCLUDE_DIRS}
