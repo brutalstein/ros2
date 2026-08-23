@@ -55,7 +55,8 @@ case "${1:-}" in
     set -e
 
     if [[ ${runtime_code} -ne 0 ]]; then
-      echo "[WARN] PX4/ROS startup failed; stopping managed Gazebo"
+      echo "[WARN] PX4/ROS startup failed; cleaning the partial runtime"
+      python3 "${ROOT}/tools/drone.py" stop || true
       python3 "${GAZEBO_TOOL}" stop || true
       exit "${runtime_code}"
     fi
