@@ -8,6 +8,7 @@
 #include "px4_msgs/msg/offboard_control_mode.hpp"
 #include "px4_msgs/msg/trajectory_setpoint.hpp"
 #include "px4_msgs/msg/vehicle_command.hpp"
+#include "px4_msgs/msg/vehicle_command_ack.hpp"
 #include "px4_msgs/msg/vehicle_local_position.hpp"
 #include "px4_msgs/msg/vehicle_status.hpp"
 
@@ -54,6 +55,14 @@ public:
                 have_position_ = msg->xy_valid && msg->z_valid;
             });
 
+        command_ack_sub_ = create_subscription<px4_msgs::msg::VehicleCommandAck>(
+            topics::PX4_VEHICLE_COMMAND_ACK,
+            sensor_qos,
+            [this](px4_msgs::msg::VehicleCommandAck::SharedPtr msg)
+            {
+                command_ack_callback(msg);
+            });
+
         timer_ = create_wall_timer(100ms, [this]() { control_loop(); });
 
         RCLCPP_INFO(
@@ -79,6 +88,7 @@ private:
 
     rclcpp::Subscription<px4_msgs::msg::VehicleStatus>::SharedPtr status_sub_;
     rclcpp::Subscription<px4_msgs::msg::VehicleLocalPosition>::SharedPtr position_sub_;
+    rclcpp::Subscription<px4_msgs::msg::VehicleCommandAck>::SharedPtr command_ack_sub_;
     rclcpp::TimerBase::SharedPtr timer_;
 
     px4_msgs::msg::VehicleStatus latest_status_{};
@@ -180,6 +190,31 @@ private:
             1.0F);
 
         RCLCPP_INFO(get_logger(), "requested OFFBOARD mode + arm");
+    }
+
+    void command_ack_callback(const px4_msgs::msg::VehicleCommandAck::SharedPtr msg)
+    {
+        if (msg->command != px4_msgs::msg::VehicleCommand::VEHICLE_CMD_DO_SET_MODE &&
+            msg->command != px4_msgs::msg::VehicleCommand::VEHICLE_CMD_COMPONENT_ARM_DISARM)
+        {
+            return;
+        }
+
+        if (msg->result == px4_msgs::msg::VehicleCommandAck::VEHICLE_CMD_RESULT_ACCEPTED)
+        {
+            RCLCPP_INFO(
+                get_logger(),
+                "PX4 command accepted | command=%u",
+                static_cast<unsigned int>(msg->command));
+            return;
+        }
+
+        RCLCPP_WARN(
+            get_logger(),
+            "PX4 command rejected/pending | command=%u result=%u reason=%u",
+            static_cast<unsigned int>(msg->command),
+            static_cast<unsigned int>(msg->result),
+            static_cast<unsigned int>(msg->result_param1));
     }
 
     bool armed() const
