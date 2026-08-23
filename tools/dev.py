@@ -17,6 +17,7 @@ PACKAGE_XML = APP / "package.xml"
 MAIN_CPP = APP / "main.cpp"
 ENTRY_EXECUTABLE = "drone_app"
 CODE_SUFFIXES = {".cpp", ".cc", ".cxx", ".hpp", ".h"}
+CPP_SUFFIXES = {".cpp", ".cc", ".cxx"}
 MAIN_RE = re.compile(r"(?m)^[ \t]*int\s+main\s*\(")
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
 
@@ -53,30 +54,11 @@ def code_files():
 
 
 def cpp_files():
-    return [p for p in code_files() if p.suffix in {".cpp", ".cc", ".cxx"}]
+    return [p for p in code_files() if p.suffix in CPP_SUFFIXES]
 
 
-def module_files():
+def source_files():
     return [p for p in cpp_files() if p != MAIN_CPP]
-
-
-def module_map():
-    modules = {}
-    duplicates = {}
-    for path in module_files():
-        name = path.stem
-        if name in modules:
-            duplicates.setdefault(name, [modules[name]]).append(path)
-        else:
-            modules[name] = path
-    if duplicates:
-        lines = ["Duplicate module names found:"]
-        for name, paths in sorted(duplicates.items()):
-            lines.append(f"  {name}")
-            lines.extend(f"    - {p.relative_to(ROOT)}" for p in paths)
-        lines.append("Module filenames must be unique across app/.")
-        fail("\n".join(lines))
-    return modules
 
 
 def expected_header(path):
@@ -85,6 +67,50 @@ def expected_header(path):
 
 def expected_factory(path):
     return f"make_{path.stem}_node"
+
+
+def has_node_factory(path):
+    header = expected_header(path)
+    if not header.is_file():
+        return False
+    factory = expected_factory(path)
+    return re.search(rf"\b{re.escape(factory)}\s*\(", read(header)) is not None
+
+
+def source_kind(path):
+    return "node" if has_node_factory(path) else "helper"
+
+
+def node_files():
+    return [p for p in source_files() if source_kind(p) == "node"]
+
+
+def helper_files():
+    return [p for p in source_files() if source_kind(p) == "helper"]
+
+
+def module_files():
+    """Backward-compatible alias for node modules."""
+    return node_files()
+
+
+def module_map():
+    modules = {}
+    duplicates = {}
+    for path in node_files():
+        name = path.stem
+        if name in modules:
+            duplicates.setdefault(name, [modules[name]]).append(path)
+        else:
+            modules[name] = path
+    if duplicates:
+        lines = ["Duplicate node factory names found:"]
+        for name, paths in sorted(duplicates.items()):
+            lines.append(f"  {expected_factory(paths[0])}()")
+            lines.extend(f"    - {p.relative_to(ROOT)}" for p in paths)
+        lines.append("Node filenames must be unique because their factory names are global.")
+        fail("\n".join(lines))
+    return modules
 
 
 def validate_module_contract(path):
@@ -127,11 +153,13 @@ def validate_project():
     if MAIN_CPP.exists() and not MAIN_RE.search(read(MAIN_CPP)):
         errors.append("app/main.cpp must define int main(...)")
 
-    for path in module_files():
+    for path in source_files():
         if MAIN_RE.search(read(path)):
             errors.append(
                 f"{path.relative_to(ROOT)} defines main(); only app/main.cpp may own process startup"
             )
+
+    for path in node_files():
         errors.extend(validate_module_contract(path))
 
     try:
@@ -221,11 +249,15 @@ def install_ros_deps(env):
 def refresh_compile_commands():
     source = bootstrap.BUILD / "drone" / "compile_commands.json"
     target = bootstrap.WORKSPACE / "compile_commands.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+
     if not source.exists():
         say("[WARN] compiler database was not generated")
         return
+
     if target.exists() or target.is_symlink():
         target.unlink()
+
     target.symlink_to(Path("build/drone/compile_commands.json"))
     say("[OK] VS Code compiler database refreshed")
 
@@ -237,7 +269,8 @@ def build():
     env["CMAKE_BUILD_PARALLEL_LEVEL"] = str(info["build_jobs"])
     sync_deps(env)
     install_ros_deps(env)
-    bootstrap.run([
+
+    command = [
         "colcon", "--log-base", bootstrap.LOG, "build",
         "--base-paths", APP,
         "--build-base", bootstrap.BUILD,
@@ -246,8 +279,16 @@ def build():
         "--symlink-install",
         "--event-handlers", "console_direct+",
         "--cmake-args", "-DCMAKE_EXPORT_COMPILE_COMMANDS=ON",
-    ], env=env)
-    refresh_compile_commands()
+    ]
+
+    try:
+        bootstrap.run(command, env=env)
+    finally:
+        # CMake usually writes compile_commands.json before compilation begins.
+        # Refresh it even after a compile error so VS Code can immediately resolve
+        # newly-created helpers, headers and include paths while the user fixes code.
+        refresh_compile_commands()
+
     say("[OK] build complete")
 
 
@@ -272,7 +313,7 @@ def create_node(value):
         fail(f"already exists: {existing.relative_to(ROOT)}")
 
     if rel.name in module_map():
-        fail(f"module name must be unique: {rel.name}")
+        fail(f"node factory name must be unique: {rel.name}")
 
     cpp_path.parent.mkdir(parents=True, exist_ok=True)
     node = rel.name
@@ -290,11 +331,31 @@ def create_node(value):
         encoding="utf-8",
     )
 
-    say(f"[OK] created {cpp_path.relative_to(ROOT)}")
-    say(f"[OK] created {hpp_path.relative_to(ROOT)}")
-    say("[OK] module source will be linked automatically by CMake")
+    say(f"[OK] created node source {cpp_path.relative_to(ROOT)}")
+    say(f"[OK] created node header {hpp_path.relative_to(ROOT)}")
+    say("[OK] source will be linked automatically by CMake")
     say(f"[ACTION] register make_{node}_node() manually in app/runtime/node_registry.hpp")
     say("No app/main.cpp edit is required.")
+
+
+def create_component(value):
+    rel = validate_rel_name(value, ".cpp")
+    cpp_path = APP / rel.with_suffix(".cpp")
+    hpp_path = APP / rel.with_suffix(".hpp")
+
+    if cpp_path.exists() or hpp_path.exists():
+        existing = cpp_path if cpp_path.exists() else hpp_path
+        fail(f"already exists: {existing.relative_to(ROOT)}")
+
+    cpp_path.parent.mkdir(parents=True, exist_ok=True)
+    header_rel = rel.with_suffix(".hpp").as_posix()
+
+    hpp_path.write_text("#pragma once\n", encoding="utf-8")
+    cpp_path.write_text(f'#include "{header_rel}"\n', encoding="utf-8")
+
+    say(f"[OK] created helper source {cpp_path.relative_to(ROOT)}")
+    say(f"[OK] created helper header {hpp_path.relative_to(ROOT)}")
+    say("[OK] helper will be discovered and linked automatically; no node factory or registry edit is required")
 
 
 def create_header(value):
@@ -316,8 +377,18 @@ def run_app(extra):
 
 def list_nodes():
     say(f"entrypoint             {MAIN_CPP.relative_to(ROOT)} -> {ENTRY_EXECUTABLE}")
-    for name, path in sorted(module_map().items()):
-        say(f"{name:<22} {path.relative_to(ROOT)} -> {expected_factory(path)}()")
+
+    nodes = module_map()
+    if nodes:
+        say("\nnode modules")
+        for name, path in sorted(nodes.items()):
+            say(f"  {name:<20} {path.relative_to(ROOT)} -> {expected_factory(path)}()")
+
+    helpers = helper_files()
+    if helpers:
+        say("\nhelper sources")
+        for path in helpers:
+            say(f"  {'helper':<20} {path.relative_to(ROOT)}")
 
 
 def fmt():
@@ -336,7 +407,8 @@ def check():
         if result.returncode:
             fail(f"syntax check failed: {script.relative_to(ROOT)}")
     say(f"[OK] single entrypoint: {MAIN_CPP.relative_to(ROOT)}")
-    say(f"[OK] {len(module_map())} module(s) satisfy manual registry contract")
+    say(f"[OK] {len(node_files())} node module(s) satisfy manual registry contract")
+    say(f"[OK] {len(helper_files())} helper source(s) will be linked automatically")
     say("[OK] automation syntax/project checks passed")
 
 
@@ -358,21 +430,26 @@ def help_text():
   ./dev b | build             incremental application build
   ./dev rb | rebuild          application clean + build
   ./dev r [ROS args...]       build + run the complete app/main.cpp system
-  ./dev n PATH                create a node module
+  ./dev n PATH                create a ROS node module
+  ./dev c PATH                create a normal C++ helper component (.hpp + .cpp)
   ./dev h PATH                create a generic header
-  ./dev ls | list             show entrypoint + discovered modules
+  ./dev ls | list             show entrypoint + discovered nodes/helpers
   ./dev d PKG                 add ROS dependency + build
   ./dev fmt                   install clang-format if needed + format code
-  ./dev check                 validate single-entry project + module contracts
+  ./dev check                 validate project + node/helper discovery
   ./dev clean                 remove only application build artifacts
   ./dev shell                 open ROS/workspace-ready shell
 
 Architecture:
   app/main.cpp is the only process entry point.
-  Node .cpp files expose make_<name>_node() factories in matching .hpp files.
-  CMake discovers and links module source files automatically.
-  app/runtime/node_registry.hpp is user-owned and registers which nodes run.
+  A C++ source with matching make_<name>_node() declaration is a node module.
+  Every other non-main .cpp/.cc/.cxx file is a helper source.
+  CMake recursively discovers and links both node and helper sources automatically.
+  Nested helpers such as flight/publisher/publisher.cpp need no node factory.
+  app/runtime/node_registry.hpp is user-owned and registers only which nodes run.
   The automation never generates make_nodes(), inserts marker comments, or edits app/main.cpp.
+  Every build refreshes .workspace/compile_commands.json for VS Code IntelliSense,
+  even when compilation fails after CMake configuration.
 
 The pinned compatibility contract is toolchain.json.
 External sources/dependencies live under .workspace/ and are never committed.
@@ -403,6 +480,10 @@ def main():
         if len(rest) != 1:
             fail("Usage: ./dev n PATH")
         create_node(rest[0])
+    elif cmd in {"c", "component", "helper"}:
+        if len(rest) != 1:
+            fail("Usage: ./dev c PATH")
+        create_component(rest[0])
     elif cmd in {"h", "header"}:
         if len(rest) != 1:
             fail("Usage: ./dev h PATH")
