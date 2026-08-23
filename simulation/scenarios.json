@@ -1,0 +1,18 @@
+{
+  "default": "training_field",
+  "worlds_dir": "simulation/worlds",
+  "scenarios": {
+    "training_field": {
+      "title": "Training Field",
+      "description": "Open flight-test area with grass, helipad, road, hangar, service building, trees and clear landmarks."
+    },
+    "urban_block": {
+      "title": "Urban Block",
+      "description": "City-block test area with roads, sidewalks, buildings, parked vehicles, street furniture and a central launch plaza."
+    },
+    "industrial_yard": {
+      "title": "Industrial Yard",
+      "description": "Industrial logistics yard with warehouses, containers, tanks, service roads and structured obstacle corridors."
+    }
+  }
+}
