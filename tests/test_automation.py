@@ -71,27 +71,34 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertNotIn('target_link_libraries("${node}" PRIVATE', cmake)
         self.assertNotIn("target_link_libraries(drone_lib PUBLIC", cmake)
 
-    def test_single_application_entrypoint_automation_contract(self):
+    def test_markerless_application_registry_contract(self):
         cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
         dev_text = (ROOT / "tools" / "dev.py").read_text(encoding="utf-8")
+        registry = (ROOT / "app" / "runtime" / "node_registry.hpp").read_text(encoding="utf-8")
 
         self.assertIn('set(DRONE_ENTRYPOINT "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")', cmake)
         self.assertIn("Only app/main.cpp may define main()", cmake)
         self.assertIn("ament_auto_add_executable(drone_app", cmake)
+        self.assertIn("DRONE_REGISTRY_SOURCE", cmake)
+        self.assertIn("DRONE_FACTORY_CALLS", cmake)
+        self.assertIn("make_${module_name}_node", cmake)
+        self.assertIn('runtime/node_registry.hpp', cmake)
 
         self.assertEqual(dev.MAIN_CPP, ROOT / "app" / "main.cpp")
         self.assertEqual(dev.ENTRY_EXECUTABLE, "drone_app")
-        self.assertIn("register_module_in_main", dev_text)
+        self.assertIn("validate_module_contract", dev_text)
         self.assertIn("make_{node}_node", dev_text)
         self.assertIn("run_app(rest)", dev_text)
+        self.assertNotIn("register_module_in_main", dev_text)
+        self.assertNotIn("DRONE_NODE_INCLUDES", dev_text)
+        self.assertNotIn("DRONE_NODE_FACTORIES", dev_text)
 
-        for marker in (
-            dev.INCLUDE_BEGIN,
-            dev.INCLUDE_END,
-            dev.FACTORY_BEGIN,
-            dev.FACTORY_END,
-        ):
-            self.assertTrue(marker.startswith("// DRONE_NODE_"))
+        self.assertIn("namespace drone_runtime", registry)
+        self.assertIn("make_nodes()", registry)
+
+        for module in ("core", "state", "sensors", "camera"):
+            path = ROOT / "app" / module / f"{module}.cpp"
+            self.assertEqual(dev.validate_module_contract(path), [])
 
     def test_main_and_flight_are_intentionally_left_for_manual_implementation(self):
         self.assertFalse((ROOT / "app" / "main.cpp").exists())

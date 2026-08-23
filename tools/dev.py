@@ -19,10 +19,6 @@ ENTRY_EXECUTABLE = "drone_app"
 CODE_SUFFIXES = {".cpp", ".cc", ".cxx", ".hpp", ".h"}
 MAIN_RE = re.compile(r"(?m)^[ \t]*int\s+main\s*\(")
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-INCLUDE_BEGIN = "// DRONE_NODE_INCLUDES_BEGIN"
-INCLUDE_END = "// DRONE_NODE_INCLUDES_END"
-FACTORY_BEGIN = "// DRONE_NODE_FACTORIES_BEGIN"
-FACTORY_END = "// DRONE_NODE_FACTORIES_END"
 
 
 def say(message=""):
@@ -83,6 +79,34 @@ def module_map():
     return modules
 
 
+def expected_header(path):
+    return path.with_suffix(".hpp")
+
+
+def expected_factory(path):
+    return f"make_{path.stem}_node"
+
+
+def validate_module_contract(path):
+    errors = []
+    header = expected_header(path)
+    factory = expected_factory(path)
+
+    if not header.is_file():
+        errors.append(
+            f"{path.relative_to(ROOT)} needs matching {header.relative_to(ROOT)}"
+        )
+        return errors
+
+    header_text = read(header)
+    if re.search(rf"\b{re.escape(factory)}\s*\(", header_text) is None:
+        errors.append(
+            f"{header.relative_to(ROOT)} must declare {factory}()"
+        )
+
+    return errors
+
+
 def validate_project():
     errors = []
     if not APP.is_dir():
@@ -100,19 +124,15 @@ def validate_project():
         except ET.ParseError as exc:
             errors.append(f"invalid package.xml: {exc}")
 
-    if MAIN_CPP.exists():
-        main_text = read(MAIN_CPP)
-        if not MAIN_RE.search(main_text):
-            errors.append("app/main.cpp must define int main(...)")
-        for marker in (INCLUDE_BEGIN, INCLUDE_END, FACTORY_BEGIN, FACTORY_END):
-            if marker not in main_text:
-                errors.append(f"app/main.cpp is missing automation marker: {marker}")
+    if MAIN_CPP.exists() and not MAIN_RE.search(read(MAIN_CPP)):
+        errors.append("app/main.cpp must define int main(...)")
 
     for path in module_files():
         if MAIN_RE.search(read(path)):
             errors.append(
                 f"{path.relative_to(ROOT)} defines main(); only app/main.cpp may own process startup"
             )
+        errors.extend(validate_module_contract(path))
 
     try:
         module_map()
@@ -242,22 +262,6 @@ def clean():
     say("[OK] application clean complete; toolchain/vendor caches preserved")
 
 
-def insert_before_marker(text, marker, line):
-    if line in text:
-        return text
-    if marker not in text:
-        fail(f"app/main.cpp is missing automation marker: {marker}")
-    return text.replace(marker, f"{line}\n{marker}", 1)
-
-
-def register_module_in_main(rel, node):
-    text = read(MAIN_CPP)
-    header_rel = rel.with_suffix(".hpp").as_posix()
-    text = insert_before_marker(text, INCLUDE_END, f'#include "{header_rel}"')
-    text = insert_before_marker(text, FACTORY_END, f"    nodes.push_back(make_{node}_node());")
-    MAIN_CPP.write_text(text, encoding="utf-8")
-
-
 def create_node(value):
     rel = validate_rel_name(value, ".cpp")
     cpp_path = APP / rel.with_suffix(".cpp")
@@ -269,13 +273,6 @@ def create_node(value):
 
     if rel.name in module_map():
         fail(f"module name must be unique: {rel.name}")
-
-    if not MAIN_CPP.exists():
-        fail("app/main.cpp is missing")
-    main_text = read(MAIN_CPP)
-    for marker in (INCLUDE_END, FACTORY_END):
-        if marker not in main_text:
-            fail(f"app/main.cpp is missing automation marker: {marker}")
 
     cpp_path.parent.mkdir(parents=True, exist_ok=True)
     node = rel.name
@@ -293,12 +290,10 @@ def create_node(value):
         encoding="utf-8",
     )
 
-    register_module_in_main(rel, node)
-
     say(f"[OK] created {cpp_path.relative_to(ROOT)}")
     say(f"[OK] created {hpp_path.relative_to(ROOT)}")
-    say("[OK] registered module in app/main.cpp")
-    say("Run the full application: ./dev r")
+    say("[OK] module will be discovered automatically at CMake configure time")
+    say("No app/main.cpp edit is required.")
 
 
 def create_header(value):
@@ -321,7 +316,7 @@ def run_app(extra):
 def list_nodes():
     say(f"entrypoint             {MAIN_CPP.relative_to(ROOT)} -> {ENTRY_EXECUTABLE}")
     for name, path in sorted(module_map().items()):
-        say(f"{name:<22} {path.relative_to(ROOT)}")
+        say(f"{name:<22} {path.relative_to(ROOT)} -> {expected_factory(path)}()")
 
 
 def fmt():
@@ -340,7 +335,7 @@ def check():
         if result.returncode:
             fail(f"syntax check failed: {script.relative_to(ROOT)}")
     say(f"[OK] single entrypoint: {MAIN_CPP.relative_to(ROOT)}")
-    say(f"[OK] {len(module_map())} module(s) linked into {ENTRY_EXECUTABLE}")
+    say(f"[OK] {len(module_map())} module(s) satisfy markerless registry contract")
     say("[OK] automation syntax/project checks passed")
 
 
@@ -362,19 +357,20 @@ def help_text():
   ./dev b | build             incremental application build
   ./dev rb | rebuild          application clean + build
   ./dev r [ROS args...]       build + run the complete app/main.cpp system
-  ./dev n PATH                create + auto-register a node module
+  ./dev n PATH                create an auto-discovered node module
   ./dev h PATH                create a generic header
-  ./dev ls | list             show the single entrypoint + linked modules
+  ./dev ls | list             show entrypoint + discovered modules
   ./dev d PKG                 add ROS dependency + build
   ./dev fmt                   install clang-format if needed + format code
-  ./dev check                 validate single-entry project + automation syntax
+  ./dev check                 validate single-entry project + module contracts
   ./dev clean                 remove only application build artifacts
   ./dev shell                 open ROS/workspace-ready shell
 
 Architecture:
   app/main.cpp is the only process entry point.
-  Node .cpp files expose make_<name>_node() factories and are linked into drone_lib.
-  ./dev n automatically adds new modules to app/main.cpp.
+  Node .cpp files expose make_<name>_node() factories in matching .hpp files.
+  CMake discovers modules and generates the registry implementation automatically.
+  The automation never inserts marker comments or edits app/main.cpp.
 
 The pinned compatibility contract is toolchain.json.
 External sources/dependencies live under .workspace/ and are never committed.
