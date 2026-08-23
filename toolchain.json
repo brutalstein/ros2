@@ -15,7 +15,20 @@
       "apt_packages": [
         "ros-jazzy-ros-base",
         "ros-dev-tools",
-        "ros-jazzy-ros-gz"
+        "ros-jazzy-ros-gz",
+        "ros-jazzy-sensor-msgs",
+        "ros-jazzy-cv-bridge",
+        "ros-jazzy-image-transport",
+        "ros-jazzy-image-geometry",
+        "ros-jazzy-message-filters",
+        "ros-jazzy-vision-msgs",
+        "ros-jazzy-geometry-msgs",
+        "ros-jazzy-nav-msgs",
+        "ros-jazzy-tf2-ros",
+        "ros-jazzy-tf2-geometry-msgs",
+        "ros-jazzy-tf2-eigen",
+        "libopencv-dev",
+        "libeigen3-dev"
       ]
     },
     "px4": {
