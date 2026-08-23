@@ -105,8 +105,13 @@ class ToolchainContractTests(unittest.TestCase):
             path = ROOT / "app" / module / f"{module}.cpp"
             self.assertEqual(dev.validate_module_contract(path), [])
 
-    def test_main_and_flight_are_intentionally_left_for_manual_implementation(self):
-        self.assertFalse((ROOT / "app" / "main.cpp").exists())
+    def test_main_is_user_owned_and_flight_is_still_manual(self):
+        main = (ROOT / "app" / "main.cpp").read_text(encoding="utf-8")
+        self.assertIn("int main", main)
+        self.assertIn("drone_runtime::make_nodes()", main)
+        self.assertNotIn("DRONE_NODE_INCLUDES", main)
+        self.assertNotIn("DRONE_NODE_FACTORIES", main)
+
         self.assertFalse((ROOT / "app" / "flight" / "flight.cpp").exists())
         self.assertFalse((ROOT / "app" / "flight" / "flight.hpp").exists())
 
