@@ -1,6 +1,7 @@
 #include <memory>
 #include <vector>
 
+#include "rclcpp/executors/single_threaded_executor.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 // DRONE_NODE_INCLUDES_BEGIN
