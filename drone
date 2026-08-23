@@ -28,7 +28,7 @@ esac
 # continue to be forwarded to tools/drone.py unchanged.
 if [[ "${1:-}" == "start" && -n "${2:-}" ]] && python3 "${SCENARIO_TOOL}" is-known "$2" >/dev/null 2>&1; then
   python3 "${SCENARIO_TOOL}" select "$2" >/dev/null
-  shift
+  set -- start "${@:3}"
 fi
 
 SELECTED_SCENARIO="$(python3 "${SCENARIO_TOOL}" current --name-only)"
