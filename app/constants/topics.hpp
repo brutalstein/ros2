@@ -11,6 +11,9 @@ namespace topics
     inline constexpr const char PX4_VEHICLE_STATUS[] =
         "/fmu/out/vehicle_status_v1";
 
+    inline constexpr const char PX4_VEHICLE_COMMAND_ACK[] =
+        "/fmu/out/vehicle_command_ack";
+
     inline constexpr const char PX4_IMU_SENSOR[] =
         "/fmu/out/sensor_combined";
 
