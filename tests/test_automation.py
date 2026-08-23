@@ -71,7 +71,7 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertNotIn('target_link_libraries("${node}" PRIVATE', cmake)
         self.assertNotIn("target_link_libraries(drone_lib PUBLIC", cmake)
 
-    def test_markerless_application_registry_contract(self):
+    def test_manual_application_registry_contract(self):
         cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
         dev_text = (ROOT / "tools" / "dev.py").read_text(encoding="utf-8")
         registry = (ROOT / "app" / "runtime" / "node_registry.hpp").read_text(encoding="utf-8")
@@ -79,10 +79,11 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertIn('set(DRONE_ENTRYPOINT "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")', cmake)
         self.assertIn("Only app/main.cpp may define main()", cmake)
         self.assertIn("ament_auto_add_executable(drone_app", cmake)
-        self.assertIn("DRONE_REGISTRY_SOURCE", cmake)
-        self.assertIn("DRONE_FACTORY_CALLS", cmake)
+        self.assertNotIn("DRONE_REGISTRY_SOURCE", cmake)
+        self.assertNotIn("DRONE_FACTORY_CALLS", cmake)
+        self.assertNotIn("file(WRITE", cmake)
+        self.assertNotIn("generated/node_registry.cpp", cmake)
         self.assertIn("make_${module_name}_node", cmake)
-        self.assertIn('runtime/node_registry.hpp', cmake)
 
         self.assertEqual(dev.MAIN_CPP, ROOT / "app" / "main.cpp")
         self.assertEqual(dev.ENTRY_EXECUTABLE, "drone_app")
@@ -95,6 +96,10 @@ class ToolchainContractTests(unittest.TestCase):
 
         self.assertIn("namespace drone_runtime", registry)
         self.assertIn("make_nodes()", registry)
+        self.assertIn("make_core_node()", registry)
+        self.assertIn("make_state_node()", registry)
+        self.assertIn("make_sensors_node()", registry)
+        self.assertIn("make_camera_node()", registry)
 
         for module in ("core", "state", "sensors", "camera"):
             path = ROOT / "app" / module / f"{module}.cpp"
