@@ -102,7 +102,7 @@ private:
     static constexpr int PRIME_CYCLES_REQUIRED = 20; // 2 seconds at 10 Hz.
     static constexpr int COMMAND_RETRY_CYCLES = 10;  // Retry once per second.
 
-    uint64_t timestamp_us() const
+    uint64_t timestamp_us()
     {
         return static_cast<uint64_t>(get_clock()->now().nanoseconds() / 1000);
     }
