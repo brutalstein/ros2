@@ -7,6 +7,7 @@
 #include "state/state.hpp"
 #include "sensors/sensors.hpp"
 #include "camera/camera.hpp"
+#include "flight/flight.hpp"
 #include "rclcpp/rclcpp.hpp"
 
 namespace drone_runtime
@@ -18,7 +19,7 @@ namespace drone_runtime
       nodes.push_back(make_state_node());
       nodes.push_back(make_sensors_node());
       nodes.push_back(make_camera_node());
-
+      nodes.push_back(make_flight_node());
       return nodes;
     }
 }

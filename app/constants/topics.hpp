@@ -16,4 +16,7 @@ namespace topics
 
     inline constexpr const char PX4_GNSS_SENSOR[] =
         "/fmu/out/vehicle_gps_position";
+        
+    inline constexpr const char PX4_OFFBOARD_CONTROL_MODE[] =
+        "/fmu/in/offboard_control_mode";
 }
