@@ -1,11 +1,9 @@
 #include <memory>
 
-#include "rclcpp/rclcpp.hpp"
-
+#include "sensors/sensors.hpp"
+#include "constants/topics.hpp"
 #include "px4_msgs/msg/sensor_combined.hpp"
 #include "px4_msgs/msg/sensor_gps.hpp"
-
-#include "constants/topics.hpp"
 
 class SensorsNode final : public rclcpp::Node
 {
@@ -15,38 +13,30 @@ public:
     {
         auto qos = rclcpp::SensorDataQoS();
 
-        imu_sub_ =
-            create_subscription<px4_msgs::msg::SensorCombined>(
-                topics::PX4_IMU_SENSOR,
-                qos,
-                [this](px4_msgs::msg::SensorCombined::SharedPtr msg)
-                {
-                    imu_callback(msg);
-                });
+        imu_sub_ = create_subscription<px4_msgs::msg::SensorCombined>(
+            topics::PX4_IMU_SENSOR,
+            qos,
+            [this](px4_msgs::msg::SensorCombined::SharedPtr msg)
+            {
+                imu_callback(msg);
+            });
 
-        gnss_sub_ =
-            create_subscription<px4_msgs::msg::SensorGps>(
-                topics::PX4_GNSS_SENSOR,
-                qos,
-                [this](px4_msgs::msg::SensorGps::SharedPtr msg)
-                {
-                    gnss_callback(msg);
-                });
+        gnss_sub_ = create_subscription<px4_msgs::msg::SensorGps>(
+            topics::PX4_GNSS_SENSOR,
+            qos,
+            [this](px4_msgs::msg::SensorGps::SharedPtr msg)
+            {
+                gnss_callback(msg);
+            });
 
         RCLCPP_INFO(get_logger(), "sensors started");
     }
 
 private:
-    rclcpp::Subscription<
-        px4_msgs::msg::SensorCombined
-    >::SharedPtr imu_sub_;
+    rclcpp::Subscription<px4_msgs::msg::SensorCombined>::SharedPtr imu_sub_;
+    rclcpp::Subscription<px4_msgs::msg::SensorGps>::SharedPtr gnss_sub_;
 
-    rclcpp::Subscription<
-        px4_msgs::msg::SensorGps
-    >::SharedPtr gnss_sub_;
-
-    void imu_callback(
-        const px4_msgs::msg::SensorCombined::SharedPtr msg)
+    void imu_callback(const px4_msgs::msg::SensorCombined::SharedPtr msg)
     {
         const float ax = msg->accelerometer_m_s2[0];
         const float ay = msg->accelerometer_m_s2[1];
@@ -69,15 +59,11 @@ private:
             gz);
     }
 
-    void gnss_callback(
-        const px4_msgs::msg::SensorGps::SharedPtr msg)
+    void gnss_callback(const px4_msgs::msg::SensorGps::SharedPtr msg)
     {
         const double latitude = msg->latitude_deg;
         const double longitude = msg->longitude_deg;
         const double altitude = msg->altitude_msl_m;
-
-        const float horizontal_accuracy = msg->eph;
-        const float vertical_accuracy = msg->epv;
 
         RCLCPP_INFO_THROTTLE(
             get_logger(),
@@ -89,8 +75,8 @@ private:
             altitude,
             static_cast<unsigned int>(msg->fix_type),
             static_cast<unsigned int>(msg->satellites_used),
-            horizontal_accuracy,
-            vertical_accuracy);
+            msg->eph,
+            msg->epv);
 
         if (msg->vel_ned_valid)
         {
@@ -106,14 +92,7 @@ private:
     }
 };
 
-int main(int argc, char *argv[])
+std::shared_ptr<rclcpp::Node> make_sensors_node()
 {
-    rclcpp::init(argc, argv);
-
-    rclcpp::spin(
-        std::make_shared<SensorsNode>());
-
-    rclcpp::shutdown();
-
-    return 0;
+    return std::make_shared<SensorsNode>();
 }
