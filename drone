@@ -3,6 +3,7 @@ set -eo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SCENARIO_TOOL="${ROOT}/tools/scenarios.py"
+GAZEBO_TOOL="${ROOT}/tools/gazebo_runtime.py"
 WORLDS_DIR="${ROOT}/simulation/worlds"
 
 case "${1:-}" in
@@ -33,16 +34,77 @@ fi
 
 SELECTED_SCENARIO="$(python3 "${SCENARIO_TOOL}" current --name-only)"
 export PX4_GZ_WORLD="${SELECTED_SCENARIO}"
+export PX4_GZ_STANDALONE=1
+export GZ_PARTITION="$(python3 "${GAZEBO_TOOL}" partition)"
+export DRONE_RUNTIME_OWNER="$(python3 "${GAZEBO_TOOL}" owner)"
 export GZ_SIM_RESOURCE_PATH="${WORLDS_DIR}${GZ_SIM_RESOURCE_PATH:+:${GZ_SIM_RESOURCE_PATH}}"
 
-if [[ "${1:-}" == "start" ]]; then
-  echo "[INFO] scenario: ${PX4_GZ_WORLD}"
-fi
+case "${1:-}" in
+  start)
+    echo "[INFO] scenario: ${PX4_GZ_WORLD}"
+    echo "[INFO] Gazebo mode: managed standalone"
 
-if [[ "${1:-}" == "status" ]]; then
-  python3 "${ROOT}/tools/drone.py" "$@"
-  python3 "${SCENARIO_TOOL}" current
-  exit 0
-fi
+    # Start and validate the repository-owned Gazebo world first. PX4 is then
+    # connected in its officially supported standalone mode, which avoids PX4
+    # rewriting custom world names into its own Tools/simulation/gz/worlds path.
+    python3 "${GAZEBO_TOOL}" start "${SELECTED_SCENARIO}"
 
-exec python3 "${ROOT}/tools/drone.py" "$@"
+    set +e
+    python3 "${ROOT}/tools/drone.py" "$@"
+    runtime_code=$?
+    set -e
+
+    if [[ ${runtime_code} -ne 0 ]]; then
+      echo "[WARN] PX4/ROS startup failed; cleaning the partial runtime"
+      python3 "${ROOT}/tools/drone.py" stop || true
+      python3 "${GAZEBO_TOOL}" stop || true
+      exit "${runtime_code}"
+    fi
+    exit 0
+    ;;
+
+  stop)
+    # Stop PX4 / bridge / DDS first, then the GUI and server. The Gazebo helper
+    # also recovers orphaned processes leaked by the previous launch strategy.
+    set +e
+    python3 "${ROOT}/tools/drone.py" stop
+    core_code=$?
+    python3 "${GAZEBO_TOOL}" stop
+    gazebo_code=$?
+    set -e
+    if [[ ${core_code} -ne 0 ]]; then exit "${core_code}"; fi
+    exit "${gazebo_code}"
+    ;;
+
+  cleanup)
+    # Explicit recovery command for a partially failed or stale runtime.
+    python3 "${ROOT}/tools/drone.py" stop || true
+    exec python3 "${GAZEBO_TOOL}" cleanup
+    ;;
+
+  status)
+    python3 "${ROOT}/tools/drone.py" status
+    python3 "${GAZEBO_TOOL}" status
+    python3 "${SCENARIO_TOOL}" current
+    exit 0
+    ;;
+
+  logs)
+    if [[ " ${*:2} " != *" -f "* && " ${*:2} " != *" --follow "* ]]; then
+      python3 "${ROOT}/tools/drone.py" logs
+      python3 "${GAZEBO_TOOL}" logs
+      exit 0
+    fi
+    exec python3 "${ROOT}/tools/drone.py" "$@"
+    ;;
+
+  gz-logs)
+    exec python3 "${GAZEBO_TOOL}" logs
+    ;;
+
+  *)
+    # Internal _px4-run / _px4-background invocations land here too. They inherit
+    # PX4_GZ_STANDALONE, the selected world name and this repo's Gazebo partition.
+    exec python3 "${ROOT}/tools/drone.py" "$@"
+    ;;
+esac
