@@ -6,8 +6,8 @@ import subprocess
 from pathlib import Path
 
 import bootstrap
-import drone as runtime
 import qgroundcontrol as qgc
+import runtime
 
 ROOT = bootstrap.ROOT
 MISSION_LOG = bootstrap.WORKSPACE / "mission" / "app.log"
@@ -67,14 +67,10 @@ def current_log_lines(path: Path) -> list[str]:
         return []
 
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-
-    # PX4 logs are appended between runs. Only inspect the current/last run so
-    # a previous preflight failure cannot become today's diagnosis.
     if path == PX4_LOG:
         markers = [index for index, line in enumerate(lines) if line.startswith("=====")]
         if markers:
             lines = lines[markers[-1] :]
-
     return lines[-400:]
 
 
@@ -94,7 +90,7 @@ def latest_log_reason() -> str | None:
     return None
 
 
-def main() -> None:
+def report() -> None:
     px4 = runtime.read_state(runtime.PX4_STATE)
     px4_running = runtime.alive(px4)
     qgc_running = qgc.alive()
@@ -107,8 +103,8 @@ def main() -> None:
     if not px4_running:
         print("PX4: STOPPED")
         print(f"QGroundControl: {'RUNNING' if qgc_running else 'STOPPED'}")
-        reason = latest_log_reason()
         print("Takeoff: NOT RUNNING")
+        reason = latest_log_reason()
         if reason:
             print(f"Last issue: {reason}")
         return
@@ -136,13 +132,12 @@ def main() -> None:
     print(f"Preflight: {'READY' if preflight else 'BLOCKED'} | Local position: {'OK' if position_valid else 'INVALID'}")
 
     reasons: list[str] = []
-
     if gcs_lost:
-        if qgc_running:
-            reasons.append("QGroundControl is open but PX4 has no GCS MAVLink connection")
-        else:
-            reasons.append("QGroundControl is not running")
-
+        reasons.append(
+            "QGroundControl is open but PX4 has no GCS MAVLink connection"
+            if qgc_running
+            else "QGroundControl is not running"
+        )
     if failsafe:
         reasons.append("PX4 failsafe is active")
     if not position_valid:
@@ -181,11 +176,7 @@ def main() -> None:
         if not stale_gcs_message:
             reasons.insert(0, log_reason)
 
-    unique_reasons: list[str] = []
-    for reason in reasons:
-        if reason not in unique_reasons:
-            unique_reasons.append(reason)
-
+    unique_reasons = list(dict.fromkeys(reasons))
     if armed and offboard and position_valid and not failsafe and not gcs_lost:
         print("Takeoff: ACTIVE/READY")
     elif unique_reasons:
@@ -196,4 +187,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    report()
