@@ -23,3 +23,13 @@ jobs:
             echo 'Generated Python bytecode must not be committed.'
             exit 1
           fi
+
+  cpp-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned ROS/PX4 toolchain
+        run: ./dev setup
+      - name: Compile the complete C++ application
+        run: ./dev b
