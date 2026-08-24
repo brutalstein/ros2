@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import signal
@@ -43,6 +44,22 @@ def ensure_dirs() -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def valid_binary(path: Path, spec: dict) -> bool:
+    if not path.is_file():
+        return False
+    if path.stat().st_size != int(spec["size_bytes"]):
+        return False
+    return sha256_file(path) == spec["sha256"]
+
+
 def setup() -> Path:
     ensure_dirs()
     manifest = bootstrap.load_manifest()
@@ -55,12 +72,15 @@ def setup() -> Path:
 
     target = binary_path(manifest)
     target.parent.mkdir(parents=True, exist_ok=True)
-    minimum_bytes = int(spec.get("minimum_bytes", 1_000_000))
 
-    if target.is_file() and target.stat().st_size >= minimum_bytes:
+    if valid_binary(target, spec):
         target.chmod(0o755)
-        say(f"[OK] QGroundControl {spec['version']} already installed")
+        say(f"[OK] QGroundControl {spec['version']} already installed and verified")
         return target
+
+    if target.exists():
+        say("[WARN] existing QGroundControl binary failed verification; replacing it")
+        target.unlink()
 
     partial = target.with_suffix(target.suffix + ".part")
     partial.unlink(missing_ok=True)
@@ -75,13 +95,23 @@ def setup() -> Path:
         spec["download_url"],
     ])
 
-    if not partial.is_file() or partial.stat().st_size < minimum_bytes:
+    expected_size = int(spec["size_bytes"])
+    if not partial.is_file() or partial.stat().st_size != expected_size:
+        actual = partial.stat().st_size if partial.exists() else 0
         partial.unlink(missing_ok=True)
-        fail("QGroundControl download is missing or unexpectedly small")
+        fail(f"QGroundControl size mismatch: expected {expected_size} bytes, got {actual}")
+
+    actual_sha256 = sha256_file(partial)
+    if actual_sha256 != spec["sha256"]:
+        partial.unlink(missing_ok=True)
+        fail(
+            "QGroundControl SHA-256 mismatch: "
+            f"expected {spec['sha256']}, got {actual_sha256}"
+        )
 
     partial.chmod(0o755)
     os.replace(partial, target)
-    say(f"[OK] QGroundControl installed: {target.relative_to(ROOT)}")
+    say(f"[OK] QGroundControl installed and verified: {target.relative_to(ROOT)}")
     return target
 
 
