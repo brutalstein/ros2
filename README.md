@@ -1,41 +1,50 @@
 # ROS 2 PX4 Drone Playground
 
-Minimal C++17 project for learning ROS 2 + PX4 Offboard control in Gazebo.
+Small C++17 ROS 2 + PX4 project for learning autonomous-drone software without exposing simulator plumbing in everyday commands.
+
 The current application intentionally does only two things:
 
-1. run a simple `Drone::takeoff()` mission,
-2. show the simulated front camera with OpenCV.
+1. execute `Drone::takeoff()` from `mission.cpp`,
+2. show the simulated front camera in OpenCV.
 
-Everything that only duplicated PX4 state or printed unused IMU/GNSS data has been removed.
-
-## Stack
+## Toolchain
 
 - Ubuntu 24.04 / WSL2 + WSLg
 - ROS 2 Jazzy
 - PX4 v1.17.0
 - `px4_msgs` release/1.17
-- Gazebo Harmonic / Gazebo Sim 8
+- Gazebo Harmonic / Sim 8
 - Micro XRCE-DDS Agent v2.4.3
 - QGroundControl v5.0.8
 - OpenCV + `cv_bridge`
-- C++17
+
+All managed dependencies and runtime state live under `.workspace/`.
+
+## Three entry points
+
+The repository has only three user-facing tools:
+
+```text
+./dev      write, build and test C++/ROS code
+./mission  run and diagnose the complete drone simulation
+./ros      inspect the live ROS graph
+```
+
+PX4, QGroundControl, Gazebo, DDS and camera-bridge helpers are internal implementation details.
 
 ## First setup
 
+Run once, and again whenever the pinned toolchain changes:
+
 ```bash
-cd ~/ros2
 ./dev setup
 ```
 
-`./dev setup` installs/builds the ROS/PX4 toolchain and also downloads the managed Linux QGroundControl AppImage into `.workspace/deps/`.
+It detects the machine, installs/repairs the pinned ROS/PX4 stack, builds required dependencies, verifies QGroundControl and prepares VS Code IntelliSense.
 
-QGroundControl runs inside Ubuntu/WSL. On WSL2, WSLg must be enabled so the GUI can open. The current SITL workflow uses MAVLink UDP only, so the setup does not modify serial-port groups or disable ModemManager.
+## Fly the mission
 
-The project keeps downloaded/build dependencies under `.workspace/`.
-
-## Run the mission
-
-The root `mission.cpp` is the user-facing mission file:
+The root `mission.cpp` is the user-facing flight program:
 
 ```cpp
 #include "flight/api/drone.hpp"
@@ -47,218 +56,152 @@ void run_mission(Drone &drone)
 }
 ```
 
-Start everything with:
+Start the complete system:
 
 ```bash
 ./mission start
 ```
 
-This builds the C++ app and then automatically starts:
+The command builds the C++ application and then manages QGroundControl, Gazebo, PX4 SITL, Micro XRCE-DDS, the camera bridge and `drone_app` in the correct order. It waits for the GCS link before the mission application starts.
 
-```text
-QGroundControl
-      |
-      | MAVLink UDP 14550
-      v
-PX4 SITL <-> Gazebo
-      |
-      | uXRCE-DDS
-      v
-Micro XRCE-DDS Agent <-> ROS 2
-      |
-      +-> FlightNode
-      `-> Camera bridge -> CameraNode -> OpenCV
-```
-
-The launcher does not continue silently if the GCS is missing. After PX4 starts it waits until `VehicleStatus.gcs_connection_lost` becomes false and prints:
-
-```text
-[OK] PX4 <-> QGroundControl connected
-```
-
-Only after the simulation runtime and GCS link are ready does `./mission start` launch `drone_app` with mission autostart enabled.
-
-Stop and reset the runtime with:
+Useful runtime commands:
 
 ```bash
-./mission stop
-```
-
-This also closes the managed QGroundControl process.
-
-Useful mission commands:
-
-```bash
-./mission start
 ./mission status
+./mission why
 ./mission logs
 ./mission stop
 ```
 
-## Current application architecture
+`./mission why` is a one-shot diagnosis. It reports current PX4/GCS/preflight/local-position/takeoff state instead of continuously streaming logs.
 
-```text
-app/main.cpp
-   |
-   +-- CameraNode
-   |     `-- /camera/image_raw -> cv_bridge -> OpenCV window
-   |
-   `-- FlightNode
-         +-- Drone API
-         +-- FlightState
-         +-- FlightSubscription
-         +-- OffboardController
-         `-- FlightPublisher
-```
-
-There is one application entry point: `app/main.cpp`.
-`mission.cpp` does not define another `main()`; it only provides `run_mission(Drone&)`, which `FlightNode` calls when `./mission start` enables mission autostart.
-
-## Takeoff flow
-
-`drone.takeoff(3.0f)` only submits the requested altitude. The controller then advances asynchronously from the ROS executor timer:
-
-```text
-wait for PX4 status + valid local position
-                |
-                v
-capture takeoff position
-                |
-                v
-stream Offboard heartbeat + hold setpoint
-                |
-                v
-request OFFBOARD
-                |
-                v
-wait for PX4 preflight readiness
-                |
-                v
-request normal ARM
-                |
-                v
-command target_z = start_z - altitude
-                |
-                v
-ASCENDING -> HOVER
-```
-
-PX4 remains responsible for position, velocity, attitude, rate and motor control. The application never force-arms the vehicle.
-
-## QGroundControl and arming
-
-The runtime now uses PX4's normal GCS behavior. There is no `NAV_DLL_ACT=0` bypass in the launcher.
-
-`./drone start` and `./mission start` both launch the managed QGroundControl process before PX4 and then verify the MAVLink GCS connection. This means a missing GCS is treated as a startup problem instead of being hidden until ARM is rejected.
-
-QGroundControl listens on the standard SITL GCS UDP port:
-
-```text
-14550/udp
-```
-
-If QGroundControl cannot open, cannot bind the port, or PX4 still reports the GCS link as lost, startup fails with a short error and cleans up the partial runtime.
-
-## Why did takeoff not happen?
-
-Use the one-shot diagnostic command:
+### Scenarios
 
 ```bash
-./drone why
+./mission scenario
+./mission scenario urban_block
+./mission scenario reset
+./mission start industrial_yard
 ```
 
-It does not stream logs continuously. It samples the latest PX4 ROS state and reports a short current diagnosis, for example:
+The default scenario is `training_field`.
 
-```text
-PX4: RUNNING | OFFBOARD | DISARMED
-QGroundControl: RUNNING | PX4 link: CONNECTED
-Preflight: BLOCKED | Local position: OK
-Takeoff: BLOCKED
-Reason: PX4 preflight checks are not ready
-```
+## Developer workflow
 
-If the GCS is the problem it now says so explicitly, for example:
-
-```text
-QGroundControl: STOPPED | PX4 link: DISCONNECTED
-Takeoff: BLOCKED
-Reason: QGroundControl is not running
-```
-
-It checks `VehicleStatus`, local position, failsafe flags, estimator flags and the most recent relevant PX4/mission error when available.
-
-For full logs:
+The developer surface is intentionally small:
 
 ```bash
-./mission logs
-./drone logs
-./drone gz-logs
+./dev build
+./dev test
+./dev nodes
+./dev new perception
+./dev run perception
+./dev clean
 ```
 
-`./drone logs` also includes recent QGroundControl output.
-
-## Camera
-
-The only ROS camera stream used by the C++ application is:
-
-```text
-/camera/image_raw
-```
-
-Flow:
-
-```text
-Gazebo camera
-  -> ros_gz_bridge
-  -> /camera/image_raw
-  -> CameraNode
-  -> cv_bridge
-  -> cv::imshow("Drone Camera")
-```
-
-Camera-info bridging is disabled because the current application does not use it.
-
-## Development commands
+### Create and test a node
 
 ```bash
-./dev setup   # install/repair ROS, PX4, DDS Agent and QGroundControl
-./dev b       # build
-./dev r       # build + run drone_app
-./dev check   # validate project structure
-./dev verify  # verify pinned core environment
-./dev clean   # clean application build output
+./dev new telemetry
 ```
 
-Runtime helpers:
+creates:
+
+```text
+app/telemetry.cpp
+app/telemetry.hpp
+```
+
+and registers `make_telemetry_node()` in `app/runtime/node_registry.hpp` automatically. CMake discovers the new source recursively, so no CMake edit is required.
+
+Inspect registration:
 
 ```bash
-./drone start
-./drone status
-./drone why
-./drone logs
-./drone stop
+./dev nodes
 ```
 
-ROS inspection helpers:
+Run only that node:
+
+```bash
+./dev run telemetry
+```
+
+`DRONE_ONLY_NODE` is handled internally by `app/main.cpp`; the normal application still runs all registered nodes. This keeps one executable and one explicit registry while making isolated node development simple.
+
+Before committing a change, run:
+
+```bash
+./dev test
+```
+
+It validates the project contract, checks Python/shell syntax, runs the repository unit tests and performs a full C++ build.
+
+## ROS inspection
+
+The ROS wrapper is read-only/inspection focused:
 
 ```bash
 ./ros topics
 ./ros nodes
-./ros once /fmu/out/vehicle_status_v1
+./ros node flight
+./ros echo /fmu/out/vehicle_status_v1
 ./ros once /fmu/out/vehicle_local_position_v1
+./ros rate /camera/image_raw
+./ros info /camera/image_raw
 ```
 
-## Scenarios
+For uncommon advanced ROS operations, use the normal `ros2` CLI directly.
 
-```bash
-./drone scenarios
-./drone scenario training_field
-./drone scenario urban_block
-./drone scenario industrial_yard
-./drone scenario reset
+## Application architecture
+
+```text
+mission.cpp
+    |
+    v
+Drone API
+    |
+    v
+FlightState <-> OffboardController <-> FlightPublisher / FlightSubscription
+    |
+    v
+PX4
+
+app/main.cpp
+    |
+    +-- CameraNode -> /camera/image_raw -> cv_bridge -> OpenCV
+    `-- FlightNode -> Drone API + PX4 Offboard control
 ```
 
-The selected world is launched by the repository-owned Gazebo runtime before PX4 connects to it.
+`app/main.cpp` is the only process entry point. `app/runtime/node_registry.hpp` is the explicit list of nodes that run. `./dev new` keeps that registry synchronized, while `./dev run NAME` selects one registered node for local development.
+
+## Takeoff flow
+
+```text
+Drone::takeoff(altitude)
+        |
+        v
+wait for PX4 status + local position
+        |
+        v
+stream Offboard heartbeat + hold setpoint
+        |
+        v
+request OFFBOARD
+        |
+        v
+wait for PX4 preflight readiness
+        |
+        v
+request normal ARM
+        |
+        v
+command target altitude
+        |
+        v
+ASCENDING -> HOVER
+```
+
+The application never force-arms the vehicle. PX4 remains responsible for low-level position, velocity, attitude, rate and motor control.
 
 ## Source layout
 
@@ -269,16 +212,10 @@ app/
   camera/
   constants/
   flight/
-    api/
-    control/
-    publisher/
-    state/
-    subscription/
   runtime/
-tools/
-  qgroundcontrol.py
+tools/          # internal automation modules
 simulation/
 tests/
 ```
 
-The former `core/`, standalone `state/` and `sensors/` nodes were removed because they duplicated information already consumed by `FlightSubscription` and were not part of takeoff or camera operation.
+The public CLI stays small even though the internal runtime is defensive: it tracks process ownership, isolates Gazebo partitions, validates worlds, verifies pinned binaries and cleans partial startup failures automatically.
