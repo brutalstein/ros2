@@ -15,46 +15,44 @@ public:
     CameraNode()
         : rclcpp::Node("camera")
     {
-        auto qos = rclcpp::SensorDataQoS();
+        const auto qos = rclcpp::SensorDataQoS();
 
         camera_sub_ = create_subscription<sensor_msgs::msg::Image>(
             camera::IMAGE_TOPIC,
             qos,
-            [this](sensor_msgs::msg::Image::SharedPtr msg)
+            [this](sensor_msgs::msg::Image::ConstSharedPtr msg)
             {
-                camera_callback(msg);
+                show_frame(msg);
             });
 
-        cv::namedWindow("Drone Camera", cv::WINDOW_NORMAL);
-        RCLCPP_INFO(get_logger(), "camera started | topic: %s", camera::IMAGE_TOPIC);
+        cv::namedWindow(WINDOW_NAME, cv::WINDOW_NORMAL);
+        RCLCPP_INFO(get_logger(), "camera ready | %s", camera::IMAGE_TOPIC);
     }
 
     ~CameraNode() override
     {
-        cv::destroyAllWindows();
+        cv::destroyWindow(WINDOW_NAME);
     }
 
 private:
+    static constexpr const char *WINDOW_NAME = "Drone Camera";
+
     rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr camera_sub_;
 
-    void camera_callback(const sensor_msgs::msg::Image::SharedPtr msg)
+    void show_frame(const sensor_msgs::msg::Image::ConstSharedPtr &msg)
     {
         try
         {
-            cv_bridge::CvImageConstPtr cv_image = cv_bridge::toCvShare(
+            const auto image = cv_bridge::toCvShare(
                 msg,
                 sensor_msgs::image_encodings::BGR8);
 
-            const cv::Mat &frame = cv_image->image;
-            cv::imshow("Drone Camera", frame);
+            cv::imshow(WINDOW_NAME, image->image);
             cv::waitKey(1);
         }
         catch (const cv_bridge::Exception &error)
         {
-            RCLCPP_ERROR(
-                get_logger(),
-                "cv_bridge error: %s",
-                error.what());
+            RCLCPP_ERROR(get_logger(), "cv_bridge: %s", error.what());
         }
     }
 };
