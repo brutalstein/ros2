@@ -45,10 +45,11 @@
       "version": "v5.0.8",
       "download_url": "https://github.com/mavlink/QGroundControl/releases/download/v5.0.8/QGroundControl-x86_64.AppImage",
       "filename": "QGroundControl-x86_64.AppImage",
+      "sha256": "06969c67ef58ea063def0a8271447a1cc385438c4a7df36813315b4475146737",
+      "size_bytes": 180816376,
       "udp_port": 14550,
       "launch_timeout_seconds": 20,
       "connection_timeout_seconds": 30,
-      "minimum_bytes": 50000000,
       "apt_packages": [
         "libfuse2",
         "libxcb-xinerama0",
