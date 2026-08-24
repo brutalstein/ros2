@@ -4,7 +4,6 @@
 
 #include "flight/state/flight_state.hpp"
 
-#include "px4_msgs/msg/vehicle_command.hpp"
 #include "px4_msgs/msg/vehicle_command_ack.hpp"
 #include "px4_msgs/msg/vehicle_local_position.hpp"
 #include "px4_msgs/msg/vehicle_status.hpp"
