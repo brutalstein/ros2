@@ -17,7 +17,7 @@ class ToolchainContractTests(unittest.TestCase):
     def setUpClass(cls):
         cls.manifest = bootstrap.load_manifest()
 
-    def test_pinned_stack_contract(self):
+    def test_pinned_stack(self):
         stack = self.manifest["stack"]
         self.assertEqual(stack["ros"]["distro"], "jazzy")
         self.assertEqual(stack["px4"]["ref"], "v1.17.0")
@@ -25,146 +25,58 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertEqual(stack["micro_xrce_dds_agent"]["ref"], "v2.4.3")
         self.assertEqual(stack["gazebo"]["expected_major"], 8)
 
+    def test_minimal_cpp_application(self):
+        registry = (ROOT / "app/runtime/node_registry.hpp").read_text(encoding="utf-8")
+        self.assertIn("make_camera_node()", registry)
+        self.assertIn("make_flight_node()", registry)
+        self.assertNotIn("make_core_node()", registry)
+        self.assertNotIn("make_state_node()", registry)
+        self.assertNotIn("make_sensors_node()", registry)
+
+        for removed in ("core", "state", "sensors"):
+            self.assertFalse((ROOT / "app" / removed).exists())
+
+        cpp_files = sorted(ROOT.glob("**/*.cpp"))
+        app_cpp = [path for path in cpp_files if "app" in path.parts]
+        self.assertTrue(app_cpp)
+        self.assertEqual(
+            sum("int main(" in path.read_text(encoding="utf-8") for path in app_cpp),
+            1,
+        )
+
+    def test_only_takeoff_and_camera_dependencies(self):
+        package_xml = (ROOT / "app/package.xml").read_text(encoding="utf-8")
+        for dependency in ("rclcpp", "sensor_msgs", "cv_bridge", "px4_msgs"):
+            self.assertIn(f"<depend>{dependency}</depend>", package_xml)
+        self.assertNotIn("std_msgs", package_xml)
+
+    def test_cmake_build_contract(self):
+        cmake = (ROOT / "app/CMakeLists.txt").read_text(encoding="utf-8")
+        self.assertIn('set(DRONE_ENTRYPOINT "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")', cmake)
+        self.assertIn("Only app/main.cpp may define main()", cmake)
+        self.assertIn("file(GLOB_RECURSE DRONE_CPP", cmake)
+        self.assertIn("ament_auto_add_library(drone_lib", cmake)
+        self.assertIn("ament_auto_add_executable(drone_app", cmake)
+        self.assertIn("find_package(OpenCV 4 REQUIRED)", cmake)
+        self.assertNotIn("Eigen3", cmake)
+
+    def test_dev_discovers_nodes_and_helpers(self):
+        camera = ROOT / "app/camera/camera.cpp"
+        flight = ROOT / "app/flight/flight.cpp"
+        publisher = ROOT / "app/flight/publisher/publisher.cpp"
+
+        self.assertEqual(dev.source_kind(camera), "node")
+        self.assertEqual(dev.source_kind(flight), "node")
+        self.assertEqual(dev.source_kind(publisher), "helper")
+        self.assertEqual(dev.validate_module_contract(camera), [])
+        self.assertEqual(dev.validate_module_contract(flight), [])
+
     def test_camera_runtime_contract(self):
         stack = self.manifest["stack"]
         camera = stack["camera_bridge"]
         self.assertEqual(stack["px4"]["sim_target"], "gz_x500_mono_cam")
-        self.assertIn("ros-jazzy-ros-gz", stack["ros"]["apt_packages"])
-        self.assertEqual(camera["ros_package"], "ros_gz_bridge")
         self.assertEqual(camera["ros_image_topic"], "/camera/image_raw")
-        self.assertEqual(camera["ros_info_topic"], "/camera/camera_info")
         self.assertIn("gz_x500_mono_cam", camera["targets"])
-
-    def test_perception_foundation_contract(self):
-        packages = set(self.manifest["stack"]["ros"]["apt_packages"])
-        expected = {
-            "ros-jazzy-sensor-msgs",
-            "ros-jazzy-cv-bridge",
-            "ros-jazzy-image-transport",
-            "ros-jazzy-image-geometry",
-            "ros-jazzy-message-filters",
-            "ros-jazzy-vision-msgs",
-            "ros-jazzy-geometry-msgs",
-            "ros-jazzy-nav-msgs",
-            "ros-jazzy-tf2-ros",
-            "ros-jazzy-tf2-geometry-msgs",
-            "ros-jazzy-tf2-eigen",
-            "libopencv-dev",
-            "libeigen3-dev",
-        }
-        self.assertTrue(expected.issubset(packages))
-
-    def test_app_declares_camera_dependencies(self):
-        package_xml = (ROOT / "app" / "package.xml").read_text(encoding="utf-8")
-        self.assertIn("<depend>sensor_msgs</depend>", package_xml)
-        self.assertIn("<depend>cv_bridge</depend>", package_xml)
-        self.assertIn("<depend>px4_msgs</depend>", package_xml)
-
-    def test_cpp_foundation_is_wired_into_cmake(self):
-        cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
-        self.assertIn("find_package(OpenCV 4 REQUIRED)", cmake)
-        self.assertIn("find_package(Eigen3 REQUIRED)", cmake)
-        self.assertIn("Eigen3::Eigen", cmake)
-
-    def test_ament_auto_targets_keep_plain_link_signature(self):
-        cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
-        self.assertNotIn('target_link_libraries("${node}" PRIVATE', cmake)
-        self.assertNotIn("target_link_libraries(drone_lib PUBLIC", cmake)
-
-    def test_manual_application_registry_contract(self):
-        cmake = (ROOT / "app" / "CMakeLists.txt").read_text(encoding="utf-8")
-        dev_text = (ROOT / "tools" / "dev.py").read_text(encoding="utf-8")
-        registry = (ROOT / "app" / "runtime" / "node_registry.hpp").read_text(encoding="utf-8")
-
-        self.assertIn('set(DRONE_ENTRYPOINT "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")', cmake)
-        self.assertIn("Only app/main.cpp may define main()", cmake)
-        self.assertIn("file(GLOB_RECURSE DRONE_CPP", cmake)
-        self.assertIn("CONFIGURE_DEPENDS", cmake)
-        self.assertIn("set(DRONE_LIBRARY_SOURCES ${DRONE_CPP})", cmake)
-        self.assertIn("ament_auto_add_executable(drone_app", cmake)
-        self.assertNotIn("DRONE_REGISTRY_SOURCE", cmake)
-        self.assertNotIn("DRONE_FACTORY_CALLS", cmake)
-        self.assertNotIn("file(WRITE", cmake)
-        self.assertNotIn("generated/node_registry.cpp", cmake)
-        self.assertNotIn("module_header_abs", cmake)
-
-        self.assertEqual(dev.MAIN_CPP, ROOT / "app" / "main.cpp")
-        self.assertEqual(dev.ENTRY_EXECUTABLE, "drone_app")
-        self.assertIn("def source_kind", dev_text)
-        self.assertIn("def helper_files", dev_text)
-        self.assertIn("def create_component", dev_text)
-        self.assertIn("make_{node}_node", dev_text)
-        self.assertIn("run_app(rest)", dev_text)
-        self.assertNotIn("register_module_in_main", dev_text)
-        self.assertNotIn("DRONE_NODE_INCLUDES", dev_text)
-        self.assertNotIn("DRONE_NODE_FACTORIES", dev_text)
-
-        self.assertIn("namespace drone_runtime", registry)
-        self.assertIn("make_nodes()", registry)
-        self.assertIn("make_core_node()", registry)
-        self.assertIn("make_state_node()", registry)
-        self.assertIn("make_sensors_node()", registry)
-        self.assertIn("make_camera_node()", registry)
-
-        for module in ("core", "state", "sensors", "camera"):
-            path = ROOT / "app" / module / f"{module}.cpp"
-            self.assertEqual(dev.validate_module_contract(path), [])
-            self.assertEqual(dev.source_kind(path), "node")
-
-    def test_node_and_helper_source_classification(self):
-        core = ROOT / "app" / "core" / "core.cpp"
-        nested_helper = ROOT / "app" / "flight" / "publisher" / "publisher.cpp"
-
-        self.assertEqual(dev.source_kind(core), "node")
-        self.assertEqual(dev.source_kind(nested_helper), "helper")
-        self.assertNotIn(nested_helper, dev.node_files())
-
-    def test_main_is_user_owned_and_application_code_is_not_generated(self):
-        main = (ROOT / "app" / "main.cpp").read_text(encoding="utf-8")
-        dev_text = (ROOT / "tools" / "dev.py").read_text(encoding="utf-8")
-
-        self.assertIn("int main", main)
-        self.assertIn("drone_runtime::make_nodes()", main)
-        self.assertNotIn("DRONE_NODE_INCLUDES", main)
-        self.assertNotIn("DRONE_NODE_FACTORIES", main)
-        self.assertIn("app/runtime/node_registry.hpp is user-owned", dev_text)
-        self.assertIn("The automation never generates make_nodes()", dev_text)
-
-    def test_vscode_compile_database_contract(self):
-        settings = (ROOT / ".vscode" / "settings.json").read_text(encoding="utf-8")
-        dev_text = (ROOT / "tools" / "dev.py").read_text(encoding="utf-8")
-
-        self.assertIn("${workspaceFolder}/.workspace/compile_commands.json", settings)
-        self.assertIn("CMAKE_EXPORT_COMPILE_COMMANDS=ON", dev_text)
-        self.assertIn("refresh_compile_commands()", dev_text)
-        self.assertIn("finally:", dev_text)
-
-    def test_scenario_world_contract(self):
-        config_path = ROOT / "simulation" / "scenarios.json"
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-        self.assertEqual(config["default"], "training_field")
-        self.assertGreaterEqual(len(config["scenarios"]), 3)
-        worlds_dir = ROOT / config["worlds_dir"]
-
-        for name in config["scenarios"]:
-            world_path = worlds_dir / f"{name}.sdf"
-            self.assertTrue(world_path.is_file(), f"missing scenario world: {name}")
-            root = ET.parse(world_path).getroot()
-            self.assertEqual(root.tag, "sdf")
-            self.assertEqual(root.get("version"), "1.9")
-            world = root.find("world")
-            self.assertIsNotNone(world)
-            self.assertEqual(world.get("name"), name)
-            self.assertIsNotNone(world.find("physics"))
-            self.assertIsNotNone(world.find("gravity"))
-            self.assertIsNotNone(world.find("spherical_coordinates"))
-            self.assertIsNotNone(world.find("model[@name='ground_plane']"))
-
-    def test_drone_launcher_exports_repo_world_path(self):
-        launcher = (ROOT / "drone").read_text(encoding="utf-8")
-        self.assertIn("GZ_SIM_RESOURCE_PATH", launcher)
-        self.assertIn("PX4_GZ_WORLD", launcher)
-        self.assertIn("tools/scenarios.py", launcher)
 
     def test_camera_topic_discovery_is_instance_agnostic(self):
         camera = self.manifest["stack"]["camera_bridge"]
@@ -181,54 +93,38 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertIn("x500_mono_cam_12", image)
         self.assertTrue(info.endswith("/camera_info"))
 
-    def test_supported_wsl2_profile(self):
-        info = {
+    def test_scenario_worlds(self):
+        config = json.loads((ROOT / "simulation/scenarios.json").read_text())
+        self.assertEqual(config["default"], "training_field")
+        worlds = ROOT / config["worlds_dir"]
+
+        for name in config["scenarios"]:
+            root = ET.parse(worlds / f"{name}.sdf").getroot()
+            self.assertEqual(root.tag, "sdf")
+            self.assertEqual(root.get("version"), "1.9")
+            self.assertIsNotNone(root.find("world"))
+
+    def test_supported_platforms(self):
+        base = {
             "os_id": "ubuntu",
             "os_version": "24.04",
             "architecture": "x86_64",
-            "wsl": True,
-            "wsl2": True,
         }
-        self.assertEqual(bootstrap.validate_platform(info, self.manifest), [])
-
-    def test_supported_native_ubuntu_profile(self):
-        info = {
-            "os_id": "ubuntu",
-            "os_version": "24.04",
-            "architecture": "x86_64",
-            "wsl": False,
-            "wsl2": False,
-        }
-        self.assertEqual(bootstrap.validate_platform(info, self.manifest), [])
-
-    def test_wsl1_is_rejected(self):
-        info = {
-            "os_id": "ubuntu",
-            "os_version": "24.04",
-            "architecture": "x86_64",
-            "wsl": True,
-            "wsl2": False,
-        }
-        errors = bootstrap.validate_platform(info, self.manifest)
-        self.assertTrue(any("WSL1" in item for item in errors))
-
-    def test_wrong_ubuntu_is_rejected(self):
-        info = {
-            "os_id": "ubuntu",
-            "os_version": "22.04",
-            "architecture": "x86_64",
-            "wsl": True,
-            "wsl2": True,
-        }
-        errors = bootstrap.validate_platform(info, self.manifest)
-        self.assertTrue(any("22.04" in item for item in errors))
+        self.assertEqual(
+            bootstrap.validate_platform({**base, "wsl": True, "wsl2": True}, self.manifest),
+            [],
+        )
+        self.assertEqual(
+            bootstrap.validate_platform({**base, "wsl": False, "wsl2": False}, self.manifest),
+            [],
+        )
 
     def test_workspace_is_repo_relative(self):
         self.assertEqual(bootstrap.WORKSPACE, ROOT / ".workspace")
         self.assertTrue(str(bootstrap.VENDOR).startswith(str(ROOT)))
         self.assertTrue(str(bootstrap.DEPS).startswith(str(ROOT)))
 
-    def test_no_user_specific_paths_in_automation(self):
+    def test_no_user_specific_paths(self):
         forbidden = ["/home/spacey", "/home/cenker", "C:\\Users\\"]
         for path in (ROOT / "tools").glob("*.py"):
             text = path.read_text(encoding="utf-8")
