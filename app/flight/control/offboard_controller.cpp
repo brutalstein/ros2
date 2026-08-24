@@ -25,11 +25,13 @@ OffboardController::OffboardController(
                 control_loop();
             });
 }
+
 uint64_t OffboardController::now_us() const
 {
     return static_cast<uint64_t>(
         node_.get_clock()->now().nanoseconds() / 1000);
 }
+
 void OffboardController::control_loop()
 {
     if (!state_.takeoff_requested) return;
@@ -62,6 +64,8 @@ void OffboardController::control_loop()
                 state_.takeoff_altitude_m;
 
             state_.warmup_cycles = 0;
+            arm_retry_cycles_ = 0;
+            arm_attempts_ = 0;
 
             state_.phase =
                 FlightPhase::OFFBOARD_WARMUP;
@@ -101,6 +105,7 @@ void OffboardController::control_loop()
             }
             break;
         }
+
         case FlightPhase::WAIT_OFFBOARD:
         {
             publisher_.publish_offboard_heartbeat(
@@ -115,17 +120,18 @@ void OffboardController::control_loop()
 
             if (state_.offboard_confirmed)
             {
-                if (!state_.arm_request_sent)
-                {
-                    request_arm();
+                request_arm();
 
-                    state_.arm_request_sent = true;
-                }
+                state_.arm_request_sent = true;
+                arm_attempts_ = 1;
+                arm_retry_cycles_ = 0;
+
                 state_.phase =
                     FlightPhase::WAIT_ARM;
             }
             break;
         }
+
         case FlightPhase::WAIT_ARM:
         {
             publisher_.publish_offboard_heartbeat(
@@ -137,6 +143,7 @@ void OffboardController::control_loop()
                 state_.start_y,
                 state_.start_z,
                 state_.yaw);
+
             if (state_.armed)
             {
                 state_.phase =
@@ -145,9 +152,40 @@ void OffboardController::control_loop()
                 RCLCPP_INFO(
                     node_.get_logger(),
                     "ARM confirmed | starting ascent");
+
+                break;
             }
+
+            arm_retry_cycles_++;
+
+            if (arm_attempts_ < ARM_MAX_ATTEMPTS &&
+                arm_retry_cycles_ >= ARM_RETRY_CYCLES)
+            {
+                arm_retry_cycles_ = 0;
+                arm_attempts_++;
+
+                RCLCPP_WARN(
+                    node_.get_logger(),
+                    "ARM not confirmed | retrying attempt %u/%u",
+                    arm_attempts_,
+                    ARM_MAX_ATTEMPTS);
+
+                request_arm();
+            }
+
+            if (arm_attempts_ >= ARM_MAX_ATTEMPTS)
+            {
+                RCLCPP_WARN_THROTTLE(
+                    node_.get_logger(),
+                    *node_.get_clock(),
+                    3000,
+                    "ARM still not confirmed after %u attempts",
+                    ARM_MAX_ATTEMPTS);
+            }
+
             break;
         }
+
         case FlightPhase::ASCENDING:
         {
             publisher_.publish_offboard_heartbeat(
@@ -159,9 +197,11 @@ void OffboardController::control_loop()
                 state_.start_y,
                 state_.target_z,
                 state_.yaw);
+
             const float altitude_error =
                 state_.target_z -
                 state_.current_z;
+
             if (std::abs(altitude_error) < 0.15f)
             {
                 state_.phase =
@@ -173,6 +213,7 @@ void OffboardController::control_loop()
             }
             break;
         }
+
         case FlightPhase::HOVER:
         {
             publisher_.publish_offboard_heartbeat(
@@ -188,6 +229,7 @@ void OffboardController::control_loop()
         }
     }
 }
+
 void OffboardController::request_offboard_mode()
 {
     publisher_.publish_vehicle_command(
@@ -196,10 +238,12 @@ void OffboardController::request_offboard_mode()
             VEHICLE_CMD_DO_SET_MODE,
         1.0f,
         6.0f);
+
     RCLCPP_INFO(
         node_.get_logger(),
         "OFFBOARD mode requested");
 }
+
 void OffboardController::request_arm()
 {
     publisher_.publish_vehicle_command(
@@ -208,6 +252,7 @@ void OffboardController::request_arm()
             VEHICLE_CMD_COMPONENT_ARM_DISARM,
         1.0f,
         0.0f);
+
     RCLCPP_INFO(
         node_.get_logger(),
         "ARM requested");
