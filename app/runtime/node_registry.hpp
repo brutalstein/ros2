@@ -9,11 +9,11 @@
 
 namespace drone_runtime
 {
-std::vector<std::shared_ptr<rclcpp::Node>> make_nodes()
+inline std::vector<std::shared_ptr<rclcpp::Node>> make_nodes()
 {
     return {
         make_camera_node(),
-        make_flight_node()
+        make_flight_node(),
     };
 }
 }
