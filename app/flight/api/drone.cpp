@@ -5,20 +5,14 @@ Drone::Drone(FlightState &state)
 {
 }
 
-int Drone::takeoff(float altitude_m)
+bool Drone::takeoff(float altitude_m)
 {
-    if (altitude_m <= 0.0f)
+    if (altitude_m <= 0.0f || state_.takeoff_requested)
     {
-        return 0;
-    }
-
-    if (state_.takeoff_requested)
-    {
-        return 0;
+        return false;
     }
 
     state_.takeoff_altitude_m = altitude_m;
     state_.takeoff_requested = true;
-
-    return 1;
+    return true;
 }
