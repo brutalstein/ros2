@@ -10,12 +10,13 @@ Everything that only duplicated PX4 state or printed unused IMU/GNSS data has be
 
 ## Stack
 
-- Ubuntu 24.04 / WSL2
+- Ubuntu 24.04 / WSL2 + WSLg
 - ROS 2 Jazzy
 - PX4 v1.17.0
 - `px4_msgs` release/1.17
 - Gazebo Harmonic / Gazebo Sim 8
 - Micro XRCE-DDS Agent v2.4.3
+- QGroundControl v5.0.8
 - OpenCV + `cv_bridge`
 - C++17
 
@@ -25,6 +26,10 @@ Everything that only duplicated PX4 state or printed unused IMU/GNSS data has be
 cd ~/ros2
 ./dev setup
 ```
+
+`./dev setup` installs/builds the ROS/PX4 toolchain and also downloads the managed Linux QGroundControl AppImage into `.workspace/deps/`.
+
+QGroundControl runs inside Ubuntu/WSL. On WSL2, WSLg must be enabled so the GUI can open. The current SITL workflow uses MAVLink UDP only, so the setup does not modify serial-port groups or disable ModemManager.
 
 The project keeps downloaded/build dependencies under `.workspace/`.
 
@@ -48,13 +53,38 @@ Start everything with:
 ./mission start
 ```
 
-This builds the C++ app, starts the selected Gazebo world and GUI, starts PX4 SITL, starts Micro XRCE-DDS, starts the camera bridge, and runs `drone_app` with mission autostart enabled.
+This builds the C++ app and then automatically starts:
+
+```text
+QGroundControl
+      |
+      | MAVLink UDP 14550
+      v
+PX4 SITL <-> Gazebo
+      |
+      | uXRCE-DDS
+      v
+Micro XRCE-DDS Agent <-> ROS 2
+      |
+      +-> FlightNode
+      `-> Camera bridge -> CameraNode -> OpenCV
+```
+
+The launcher does not continue silently if the GCS is missing. After PX4 starts it waits until `VehicleStatus.gcs_connection_lost` becomes false and prints:
+
+```text
+[OK] PX4 <-> QGroundControl connected
+```
+
+Only after the simulation runtime and GCS link are ready does `./mission start` launch `drone_app` with mission autostart enabled.
 
 Stop and reset the runtime with:
 
 ```bash
 ./mission stop
 ```
+
+This also closes the managed QGroundControl process.
 
 Useful mission commands:
 
@@ -115,15 +145,19 @@ ASCENDING -> HOVER
 
 PX4 remains responsible for position, velocity, attitude, rate and motor control. The application never force-arms the vehicle.
 
-### No QGroundControl requirement
+## QGroundControl and arming
 
-This project intentionally runs without a GCS. PX4's x500 SITL profile normally enables a GCS-loss action through `NAV_DLL_ACT`. The launcher sets:
+The runtime now uses PX4's normal GCS behavior. There is no `NAV_DLL_ACT=0` bypass in the launcher.
+
+`./drone start` and `./mission start` both launch the managed QGroundControl process before PX4 and then verify the MAVLink GCS connection. This means a missing GCS is treated as a startup problem instead of being hidden until ARM is rejected.
+
+QGroundControl listens on the standard SITL GCS UDP port:
 
 ```text
-PX4_PARAM_NAV_DLL_ACT=0
+14550/udp
 ```
 
-for this simulator profile, so the absence of QGroundControl does not by itself block arming. This does **not** disable estimator, position, sensor, failsafe or normal arming checks.
+If QGroundControl cannot open, cannot bind the port, or PX4 still reports the GCS link as lost, startup fails with a short error and cleans up the partial runtime.
 
 ## Why did takeoff not happen?
 
@@ -137,9 +171,18 @@ It does not stream logs continuously. It samples the latest PX4 ROS state and re
 
 ```text
 PX4: RUNNING | OFFBOARD | DISARMED
+QGroundControl: RUNNING | PX4 link: CONNECTED
 Preflight: BLOCKED | Local position: OK
 Takeoff: BLOCKED
 Reason: PX4 preflight checks are not ready
+```
+
+If the GCS is the problem it now says so explicitly, for example:
+
+```text
+QGroundControl: STOPPED | PX4 link: DISCONNECTED
+Takeoff: BLOCKED
+Reason: QGroundControl is not running
 ```
 
 It checks `VehicleStatus`, local position, failsafe flags, estimator flags and the most recent relevant PX4/mission error when available.
@@ -151,6 +194,8 @@ For full logs:
 ./drone logs
 ./drone gz-logs
 ```
+
+`./drone logs` also includes recent QGroundControl output.
 
 ## Camera
 
@@ -176,11 +221,22 @@ Camera-info bridging is disabled because the current application does not use it
 ## Development commands
 
 ```bash
+./dev setup   # install/repair ROS, PX4, DDS Agent and QGroundControl
 ./dev b       # build
 ./dev r       # build + run drone_app
 ./dev check   # validate project structure
-./dev verify  # verify pinned environment
+./dev verify  # verify pinned core environment
 ./dev clean   # clean application build output
+```
+
+Runtime helpers:
+
+```bash
+./drone start
+./drone status
+./drone why
+./drone logs
+./drone stop
 ```
 
 ROS inspection helpers:
@@ -220,6 +276,7 @@ app/
     subscription/
   runtime/
 tools/
+  qgroundcontrol.py
 simulation/
 tests/
 ```

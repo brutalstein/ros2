@@ -7,6 +7,7 @@ from pathlib import Path
 
 import bootstrap
 import drone as runtime
+import qgroundcontrol as qgc
 
 ROOT = bootstrap.ROOT
 MISSION_LOG = bootstrap.WORKSPACE / "mission" / "app.log"
@@ -61,6 +62,22 @@ def as_int(value: str | None, default: int = -1) -> int:
         return default
 
 
+def current_log_lines(path: Path) -> list[str]:
+    if not path.exists():
+        return []
+
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+
+    # PX4 logs are appended between runs. Only inspect the current/last run so
+    # a previous preflight failure cannot become today's diagnosis.
+    if path == PX4_LOG:
+        markers = [index for index, line in enumerate(lines) if line.startswith("=====")]
+        if markers:
+            lines = lines[markers[-1] :]
+
+    return lines[-400:]
+
+
 def latest_log_reason() -> str | None:
     patterns = (
         re.compile(r"Preflight Fail:\s*(.+)", re.IGNORECASE),
@@ -69,10 +86,7 @@ def latest_log_reason() -> str | None:
     )
 
     for path in (MISSION_LOG, PX4_LOG):
-        if not path.exists():
-            continue
-        lines = path.read_text(errors="replace").splitlines()
-        for line in reversed(lines[-400:]):
+        for line in reversed(current_log_lines(path)):
             for pattern in patterns:
                 match = pattern.search(line)
                 if match:
@@ -83,6 +97,7 @@ def latest_log_reason() -> str | None:
 def main() -> None:
     px4 = runtime.read_state(runtime.PX4_STATE)
     px4_running = runtime.alive(px4)
+    qgc_running = qgc.alive()
 
     status = read_topic(STATUS_TOPIC) if px4_running else {}
     position = read_topic(POSITION_TOPIC) if px4_running else {}
@@ -91,6 +106,7 @@ def main() -> None:
 
     if not px4_running:
         print("PX4: STOPPED")
+        print(f"QGroundControl: {'RUNNING' if qgc_running else 'STOPPED'}")
         reason = latest_log_reason()
         print("Takeoff: NOT RUNNING")
         if reason:
@@ -99,6 +115,7 @@ def main() -> None:
 
     if not status:
         print("PX4: RUNNING")
+        print(f"QGroundControl: {'RUNNING' if qgc_running else 'STOPPED'}")
         print("Takeoff: BLOCKED")
         print("Reason: ROS 2 is not receiving PX4 VehicleStatus; check DDS Agent/uXRCE-DDS.")
         return
@@ -107,13 +124,25 @@ def main() -> None:
     offboard = as_int(status.get("nav_state")) == 14
     preflight = as_bool(status.get("pre_flight_checks_pass"))
     failsafe = as_bool(status.get("failsafe"))
+    gcs_lost = as_bool(status.get("gcs_connection_lost"))
     position_valid = as_bool(position.get("xy_valid")) and as_bool(position.get("z_valid"))
 
     mode = "OFFBOARD" if offboard else f"MODE {status.get('nav_state', '?')}"
     print(f"PX4: RUNNING | {mode} | {'ARMED' if armed else 'DISARMED'}")
+    print(
+        f"QGroundControl: {'RUNNING' if qgc_running else 'STOPPED'} | "
+        f"PX4 link: {'DISCONNECTED' if gcs_lost else 'CONNECTED'}"
+    )
     print(f"Preflight: {'READY' if preflight else 'BLOCKED'} | Local position: {'OK' if position_valid else 'INVALID'}")
 
     reasons: list[str] = []
+
+    if gcs_lost:
+        if qgc_running:
+            reasons.append("QGroundControl is open but PX4 has no GCS MAVLink connection")
+        else:
+            reasons.append("QGroundControl is not running")
+
     if failsafe:
         reasons.append("PX4 failsafe is active")
     if not position_valid:
@@ -141,30 +170,29 @@ def main() -> None:
         if as_bool(failsafe_flags.get(key)):
             reasons.append(label)
 
-    if not as_bool(estimator.get("cs_tilt_align")) and estimator:
+    if estimator and not as_bool(estimator.get("cs_tilt_align")):
         reasons.append("estimator tilt alignment incomplete")
-    if not as_bool(estimator.get("cs_yaw_align")) and estimator:
+    if estimator and not as_bool(estimator.get("cs_yaw_align")):
         reasons.append("estimator yaw alignment incomplete")
 
     log_reason = latest_log_reason()
     if log_reason and not preflight:
-        reasons.insert(0, log_reason)
+        stale_gcs_message = "ground control" in log_reason.lower() and not gcs_lost
+        if not stale_gcs_message:
+            reasons.insert(0, log_reason)
 
     unique_reasons: list[str] = []
     for reason in reasons:
         if reason not in unique_reasons:
             unique_reasons.append(reason)
 
-    if armed and offboard and position_valid and not failsafe:
+    if armed and offboard and position_valid and not failsafe and not gcs_lost:
         print("Takeoff: ACTIVE/READY")
     elif unique_reasons:
         print("Takeoff: BLOCKED")
         print("Reason: " + "; ".join(unique_reasons[:4]))
     else:
         print("Takeoff: WAITING")
-
-    if as_bool(status.get("gcs_connection_lost")):
-        print("Info: GCS is disconnected (ignored by this SITL profile).")
 
 
 if __name__ == "__main__":
