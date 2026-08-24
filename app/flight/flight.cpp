@@ -1,5 +1,6 @@
 #include <cstdlib>
 #include <memory>
+#include <string_view>
 
 #include "flight/flight.hpp"
 #include "flight/api/drone.hpp"
@@ -20,21 +21,13 @@ public:
           controller_(*this, state_, publisher_),
           drone_(state_)
     {
-        RCLCPP_INFO(
-            get_logger(),
-            "flight started | waiting for safe offboard entry");
+        RCLCPP_INFO(get_logger(), "flight ready | waiting for mission");
 
-        const char *mission_autostart =
-            std::getenv("DRONE_MISSION_AUTOSTART");
+        const char *autostart = std::getenv("DRONE_MISSION_AUTOSTART");
 
-        if (mission_autostart != nullptr &&
-            mission_autostart[0] == '1' &&
-            mission_autostart[1] == '\0')
+        if (autostart != nullptr && std::string_view(autostart) == "1")
         {
-            RCLCPP_INFO(
-                get_logger(),
-                "mission autostart enabled");
-
+            RCLCPP_INFO(get_logger(), "mission started");
             run_mission(drone_);
         }
     }
