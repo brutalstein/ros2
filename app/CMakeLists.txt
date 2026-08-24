@@ -7,9 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_package(ament_cmake_auto REQUIRED)
 ament_auto_find_build_dependencies()
-
 find_package(OpenCV 4 REQUIRED)
-find_package(Eigen3 REQUIRED)
 
 set(DRONE_ENTRYPOINT "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
 set(DRONE_MISSION_STUB "${CMAKE_CURRENT_SOURCE_DIR}/runtime/mission_stub.cpp")
@@ -18,9 +16,8 @@ if(NOT EXISTS "${DRONE_ENTRYPOINT}")
   message(FATAL_ERROR "Single application entry point is missing: app/main.cpp")
 endif()
 
-# Discover every application implementation file recursively. Node sources and
-# ordinary helper sources are compiled into the same application library. The
-# only special application source is app/main.cpp, which owns process startup.
+# Compile every implementation under app/. app/main.cpp is the only process
+# entrypoint; everything else is linked into drone_lib.
 file(GLOB_RECURSE DRONE_CPP
   CONFIGURE_DEPENDS
   LIST_DIRECTORIES false
@@ -29,9 +26,8 @@ file(GLOB_RECURSE DRONE_CPP
   "${CMAKE_CURRENT_SOURCE_DIR}/*.cxx"
 )
 
-# mission.cpp intentionally lives at repository root so mission authors only
-# need the public Drone API. CONFIGURE_DEPENDS makes creating/removing it trigger
-# a CMake reconfigure on the next build.
+# A root mission.cpp is optional. When present it replaces the empty mission
+# stub and is linked into the same application.
 file(GLOB DRONE_ROOT_MISSION
   CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/../mission.cpp"
@@ -47,8 +43,6 @@ endif()
 
 list(SORT DRONE_LIBRARY_SOURCES)
 
-# Keep the single-entrypoint rule even when users bypass ./dev and invoke
-# colcon/CMake directly. Helper files and mission.cpp must not define main().
 foreach(source IN LISTS DRONE_LIBRARY_SOURCES)
   file(READ "${source}" source_text)
   string(REGEX MATCH "(^|[\r\n])[ \t]*int[ \t\r\n]+main[ \t\r\n]*\\(" has_main "${source_text}")
@@ -65,10 +59,7 @@ target_include_directories(drone_lib PUBLIC
   "${CMAKE_CURRENT_SOURCE_DIR}"
   ${OpenCV_INCLUDE_DIRS}
 )
-target_link_libraries(drone_lib
-  ${OpenCV_LIBS}
-  Eigen3::Eigen
-)
+target_link_libraries(drone_lib ${OpenCV_LIBS})
 target_compile_options(drone_lib PRIVATE -Wall -Wextra -Wpedantic)
 
 ament_auto_add_executable(drone_app "${DRONE_ENTRYPOINT}")
@@ -76,11 +67,7 @@ target_include_directories(drone_app PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
   ${OpenCV_INCLUDE_DIRS}
 )
-target_link_libraries(drone_app
-  drone_lib
-  ${OpenCV_LIBS}
-  Eigen3::Eigen
-)
+target_link_libraries(drone_app drone_lib ${OpenCV_LIBS})
 target_compile_options(drone_app PRIVATE -Wall -Wextra -Wpedantic)
 
 ament_auto_package()
