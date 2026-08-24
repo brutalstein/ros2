@@ -19,6 +19,8 @@ public:
 
 private:
     static constexpr uint32_t OFFBOARD_WARMUP_CYCLES = 15;
+    static constexpr uint32_t ARM_RETRY_CYCLES = 10;
+    static constexpr uint32_t ARM_MAX_ATTEMPTS = 5;
 
 
     rclcpp::Node &node_;
@@ -27,6 +29,9 @@ private:
 
 
     rclcpp::TimerBase::SharedPtr control_timer_;
+
+    uint32_t arm_retry_cycles_ = 0;
+    uint32_t arm_attempts_ = 0;
 
 
     uint64_t now_us() const;
