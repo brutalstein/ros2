@@ -2,14 +2,13 @@
 <package format="3">
   <name>drone</name>
   <version>0.1.0</version>
-  <description>Minimal ROS 2 drone workspace.</description>
+  <description>Minimal ROS 2 PX4 takeoff application with camera display.</description>
   <maintainer email="cenkerusta@outlook.com">Cenker Usta</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake_auto</buildtool_depend>
 
   <depend>rclcpp</depend>
-  <depend>std_msgs</depend>
   <depend>sensor_msgs</depend>
   <depend>cv_bridge</depend>
   <depend>px4_msgs</depend>
