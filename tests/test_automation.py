@@ -27,6 +27,11 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertEqual(stack["gazebo"]["expected_major"], 8)
         self.assertEqual(stack["qgroundcontrol"]["version"], "v5.0.8")
         self.assertEqual(stack["qgroundcontrol"]["udp_port"], 14550)
+        self.assertEqual(
+            stack["qgroundcontrol"]["sha256"],
+            "06969c67ef58ea063def0a8271447a1cc385438c4a7df36813315b4475146737",
+        )
+        self.assertEqual(stack["qgroundcontrol"]["size_bytes"], 180816376)
 
     def test_minimal_cpp_application(self):
         registry = (ROOT / "app/runtime/node_registry.hpp").read_text(encoding="utf-8")
@@ -101,10 +106,13 @@ class ToolchainContractTests(unittest.TestCase):
         launcher = (ROOT / "drone").read_text(encoding="utf-8")
         dev_launcher = (ROOT / "dev").read_text(encoding="utf-8")
         why = (ROOT / "tools/why.py").read_text(encoding="utf-8")
+        qgc_tool = (ROOT / "tools/qgroundcontrol.py").read_text(encoding="utf-8")
 
         self.assertTrue(qgc["enabled"])
         self.assertTrue(qgc["download_url"].startswith("https://github.com/mavlink/QGroundControl/releases/"))
         self.assertEqual(qgroundcontrol.binary_path(self.manifest).name, qgc["filename"])
+        self.assertIn("sha256_file", qgc_tool)
+        self.assertIn("size_bytes", qgc_tool)
 
         self.assertIn("tools/qgroundcontrol.py", dev_launcher)
         self.assertIn('python3 "${QGC_TOOL}" start', launcher)
