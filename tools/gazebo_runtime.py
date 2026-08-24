@@ -6,7 +6,6 @@ import json
 import os
 import signal
 import subprocess
-import sys
 import time
 from pathlib import Path
 
@@ -28,44 +27,41 @@ OWNER_ID = "drone-" + hashlib.sha256(str(ROOT.resolve()).encode()).hexdigest()[:
 PARTITION = "drone_" + hashlib.sha256(str(ROOT.resolve()).encode()).hexdigest()[:12]
 
 
-def say(message=""):
+def say(message: str = "") -> None:
     print(message, flush=True)
 
 
-def fail(message):
+def fail(message: str) -> None:
     raise SystemExit(f"[FAIL] {message}")
 
 
-def ensure_dirs():
+def ensure_dirs() -> None:
     bootstrap.ensure_dirs()
     RUNTIME.mkdir(parents=True, exist_ok=True)
     LOGS.mkdir(parents=True, exist_ok=True)
 
 
-def read_state(path):
+def read_state(path: Path) -> dict | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
 
 
-def write_state(path, data):
+def write_state(path: Path, data: dict) -> None:
     ensure_dirs()
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, path)
 
 
-def clear_state(path):
+def clear_state(path: Path) -> None:
+    path.unlink(missing_ok=True)
+
+
+def process_start_ticks(pid: int) -> str | None:
     try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
-
-
-def process_start_ticks(pid):
-    try:
-        text = Path(f"/proc/{pid}/stat").read_text()
+        text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
     except OSError:
         return None
     end = text.rfind(")")
@@ -73,7 +69,7 @@ def process_start_ticks(pid):
     return fields[19] if len(fields) > 19 else None
 
 
-def pid_identity_alive(state):
+def pid_identity_alive(state: dict | None) -> bool:
     if not state:
         return False
     try:
@@ -84,7 +80,7 @@ def pid_identity_alive(state):
     return process_start_ticks(pid) == state.get("start_ticks")
 
 
-def pgid_alive(pgid):
+def pgid_alive(pgid: int | str | None) -> bool:
     try:
         os.killpg(int(pgid), 0)
         return True
@@ -92,15 +88,11 @@ def pgid_alive(pgid):
         return False
 
 
-def state_active(state):
-    if not state:
-        return False
-    if pid_identity_alive(state):
-        return True
-    return pgid_alive(state.get("pgid"))
+def state_active(state: dict | None) -> bool:
+    return bool(state and (pid_identity_alive(state) or pgid_alive(state.get("pgid"))))
 
 
-def identity(process, kind, **extra):
+def identity(process: subprocess.Popen, kind: str, **extra) -> dict:
     return {
         "pid": process.pid,
         "pgid": os.getpgid(process.pid),
@@ -112,7 +104,7 @@ def identity(process, kind, **extra):
     }
 
 
-def wait_for(predicate, seconds, interval=0.15):
+def wait_for(predicate, seconds: float, interval: float = 0.15) -> bool:
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         if predicate():
@@ -121,24 +113,24 @@ def wait_for(predicate, seconds, interval=0.15):
     return bool(predicate())
 
 
-def load_scenarios():
+def load_scenarios() -> dict:
     try:
         return json.loads(SCENARIOS.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         fail(f"cannot read scenario configuration: {exc}")
 
 
-def validate_scenario(name):
+def validate_scenario(name: str) -> Path:
     config = load_scenarios()
     if name not in config.get("scenarios", {}):
-        fail(f"unknown scenario {name!r}; run ./drone scenarios")
+        fail(f"unknown scenario {name!r}; run ./mission scenario")
     world = WORLDS / f"{name}.sdf"
     if not world.is_file():
         fail(f"scenario world missing: {world.relative_to(ROOT)}")
     return world
 
 
-def resolved_px4_dir():
+def resolved_px4_dir() -> Path:
     state = bootstrap.load_state() or {}
     resolved = state.get("resolved", {})
     px4_dir = Path(resolved.get("px4_dir", bootstrap.VENDOR / "px4-autopilot"))
@@ -147,14 +139,14 @@ def resolved_px4_dir():
     return px4_dir
 
 
-def generated_gz_env(px4_dir):
+def generated_gz_env(px4_dir: Path) -> Path:
     path = px4_dir / "build" / "px4_sitl_default" / "rootfs" / "gz_env.sh"
     if not path.is_file():
-        fail(f"PX4 Gazebo environment is missing: {path}. Run ./dev setup first.")
+        fail(f"PX4 Gazebo environment is missing: {path}; run ./dev setup")
     return path
 
 
-def source_shell_environment(script, base_env):
+def source_shell_environment(script: Path, base_env: dict) -> dict:
     result = subprocess.run(
         ["bash", "-c", 'source "$1" >/dev/null 2>&1; env -0', "bash", str(script)],
         env=base_env,
@@ -165,7 +157,7 @@ def source_shell_environment(script, base_env):
     if result.returncode != 0:
         fail("could not load PX4 Gazebo environment")
 
-    env = {}
+    env: dict[str, str] = {}
     for item in result.stdout.split(b"\0"):
         if not item or b"=" not in item:
             continue
@@ -174,9 +166,7 @@ def source_shell_environment(script, base_env):
     return env
 
 
-def gazebo_environment(px4_dir):
-    # Source the exact environment generated by the pinned PX4 build. This keeps
-    # PX4's model path, custom plugins and server.config in sync with v1.17.
+def gazebo_environment(px4_dir: Path) -> dict:
     base = os.environ.copy()
     base["GZ_PARTITION"] = PARTITION
     base["DRONE_RUNTIME_OWNER"] = OWNER_ID
@@ -184,7 +174,7 @@ def gazebo_environment(px4_dir):
     env["GZ_PARTITION"] = PARTITION
     env["DRONE_RUNTIME_OWNER"] = OWNER_ID
 
-    existing = [p for p in env.get("GZ_SIM_RESOURCE_PATH", "").split(":") if p]
+    existing = [value for value in env.get("GZ_SIM_RESOURCE_PATH", "").split(":") if value]
     repo_worlds = str(WORLDS.resolve())
     if repo_worlds not in existing:
         existing.insert(0, repo_worlds)
@@ -192,7 +182,7 @@ def gazebo_environment(px4_dir):
     return env
 
 
-def validate_world_with_gazebo(world, env):
+def validate_world_with_gazebo(world: Path, env: dict) -> None:
     result = subprocess.run(
         ["gz", "sdf", "-k", str(world)],
         env=env,
@@ -203,11 +193,10 @@ def validate_world_with_gazebo(world, env):
         check=False,
     )
     if result.returncode != 0:
-        details = result.stdout.strip() or "unknown SDF validation error"
-        fail(f"Gazebo rejected {world.name}:\n{details}")
+        fail(f"Gazebo rejected {world.name}:\n{result.stdout.strip()}")
 
 
-def world_ready(name, env):
+def world_ready(name: str, env: dict) -> bool:
     try:
         result = subprocess.run(
             ["gz", "service", "-i", "--service", f"/world/{name}/scene/info"],
@@ -224,12 +213,12 @@ def world_ready(name, env):
     return result.returncode == 0 and "Service providers" in result.stdout
 
 
-def process_environ(pid):
+def process_environ(pid: int) -> dict[str, str]:
     try:
         raw = Path(f"/proc/{pid}/environ").read_bytes()
     except OSError:
         return {}
-    result = {}
+    result: dict[str, str] = {}
     for item in raw.split(b"\0"):
         if b"=" in item:
             key, value = item.split(b"=", 1)
@@ -237,39 +226,35 @@ def process_environ(pid):
     return result
 
 
-def process_cmdline(pid):
+def process_cmdline(pid: int) -> str:
     try:
         return Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace").strip()
     except OSError:
         return ""
 
 
-def process_cwd(pid):
+def process_cwd(pid: int) -> Path | None:
     try:
         return Path(f"/proc/{pid}/cwd").resolve()
     except OSError:
         return None
 
 
-def process_pgid(pid):
+def process_pgid(pid: int) -> int | None:
     try:
         return os.getpgid(pid)
     except OSError:
         return None
 
 
-def gazebo_like_process(pid):
-    cmd = process_cmdline(pid)
-    return "gz sim" in cmd or "gz-sim" in cmd or ("ruby" in cmd and "gz" in cmd and "sim" in cmd)
+def gazebo_like_process(pid: int) -> bool:
+    command = process_cmdline(pid)
+    return "gz sim" in command or "gz-sim" in command or ("ruby" in command and "gz" in command and "sim" in command)
 
 
-def terminate_pgid(pgid, label):
+def terminate_pgid(pgid: int | str | None, label: str) -> bool:
     if not pgid_alive(pgid):
         return True
-
-    # We only call this for process groups we explicitly own, or for the narrow
-    # legacy PX4 rootfs recovery case below. A hard kill is therefore safe as a
-    # final fallback and prevents a stuck GUI from becoming immortal.
     for sig, timeout in (
         (signal.SIGINT, 3.0),
         (signal.SIGTERM, 2.0),
@@ -287,23 +272,21 @@ def terminate_pgid(pgid, label):
     return not pgid_alive(pgid)
 
 
-def terminate_state(path, label):
+def terminate_state(path: Path, label: str) -> None:
     state = read_state(path)
     if not state:
         return
     if not state_active(state):
         clear_state(path)
         return
-
-    pgid = state.get("pgid")
-    if terminate_pgid(pgid, label):
+    if terminate_pgid(state.get("pgid"), label):
         clear_state(path)
     else:
-        say(f"[WARN] could not stop {label} pgid={pgid}")
+        say(f"[WARN] could not stop {label}")
 
 
-def protected_gazebo_pgids():
-    protected = set()
+def protected_gazebo_pgids() -> set[int]:
+    protected: set[int] = set()
     for path in (SERVER_STATE, GUI_STATE):
         state = read_state(path)
         if state_active(state) and state.get("pgid") is not None:
@@ -311,21 +294,16 @@ def protected_gazebo_pgids():
     return protected
 
 
-def cleanup_owned_orphans():
+def cleanup_owned_orphans() -> int:
     protected = protected_gazebo_pgids()
-    terminated = set()
+    terminated: set[int] = set()
     cleaned = 0
-
     for proc in Path("/proc").iterdir():
         if not proc.name.isdigit():
             continue
         pid = int(proc.name)
-        env = process_environ(pid)
-        if env.get("DRONE_RUNTIME_OWNER") != OWNER_ID:
+        if process_environ(pid).get("DRONE_RUNTIME_OWNER") != OWNER_ID or not gazebo_like_process(pid):
             continue
-        if not gazebo_like_process(pid):
-            continue
-
         pgid = process_pgid(pid)
         if pgid is None or pgid in protected or pgid in terminated:
             continue
@@ -335,25 +313,16 @@ def cleanup_owned_orphans():
     return cleaned
 
 
-def cleanup_legacy_px4_gazebo(px4_dir):
-    """Recover Gazebo leaked by the previous PX4-launched implementation.
-
-    The previous automation let PX4 start `gz sim` from its SITL rootfs. When
-    world loading failed the GUI could survive after PX4 exited. Recovery is
-    deliberately restricted to Gazebo processes whose cwd is inside that exact
-    rootfs, so unrelated user Gazebo sessions are not targeted.
-    """
+def cleanup_legacy_px4_gazebo(px4_dir: Path) -> int:
     rootfs = (px4_dir / "build" / "px4_sitl_default" / "rootfs").resolve()
-    terminated = set()
+    terminated: set[int] = set()
     cleaned = 0
-
     for proc in Path("/proc").iterdir():
         if not proc.name.isdigit():
             continue
         pid = int(proc.name)
         if not gazebo_like_process(pid):
             continue
-
         cwd = process_cwd(pid)
         if cwd is None:
             continue
@@ -361,7 +330,6 @@ def cleanup_legacy_px4_gazebo(px4_dir):
             cwd.relative_to(rootfs)
         except ValueError:
             continue
-
         pgid = process_pgid(pid)
         if pgid is None or pgid in terminated:
             continue
@@ -371,13 +339,13 @@ def cleanup_legacy_px4_gazebo(px4_dir):
     return cleaned
 
 
-def start_server(name, world, env):
+def start_server(name: str, world: Path, env: dict) -> None:
     tracked = read_state(SERVER_STATE)
     if state_active(tracked):
         if tracked.get("scenario") != name:
-            fail(f"Gazebo server already runs scenario {tracked.get('scenario')!r}; run ./drone stop first")
+            fail("another scenario is already running; use ./mission stop")
         if world_ready(name, env):
-            say(f"[OK] Gazebo server already running (pgid {tracked['pgid']})")
+            say(f"[OK] Gazebo world ready: {name}")
             return
         terminate_state(SERVER_STATE, "unhealthy Gazebo server")
     else:
@@ -398,22 +366,18 @@ def start_server(name, world, env):
 
     state = identity(process, "gazebo-server", scenario=name, world=str(world))
     write_state(SERVER_STATE, state)
-
     if not wait_for(lambda: state_active(state) and world_ready(name, env), 20.0, 0.35):
         terminate_state(SERVER_STATE, "Gazebo server")
         cleanup_owned_orphans()
-        try:
-            tail = "\n".join(SERVER_LOG.read_text(errors="replace").splitlines()[-30:])
-        except OSError:
-            tail = ""
-        fail(f"Gazebo server did not make world {name!r} ready.\n{tail}")
+        tail = "\n".join(SERVER_LOG.read_text(errors="replace").splitlines()[-30:]) if SERVER_LOG.exists() else ""
+        fail(f"Gazebo world {name!r} did not become ready.\n{tail}")
     say(f"[OK] Gazebo world ready: {name}")
 
 
-def start_gui(env):
+def start_gui(env: dict) -> None:
     tracked = read_state(GUI_STATE)
     if state_active(tracked):
-        say(f"[OK] Gazebo GUI already running (pgid {tracked['pgid']})")
+        say("[OK] Gazebo GUI ready")
         return
     clear_state(GUI_STATE)
 
@@ -435,11 +399,11 @@ def start_gui(env):
     if not wait_for(lambda: state_active(state), 2.0):
         clear_state(GUI_STATE)
         cleanup_owned_orphans()
-        fail("Gazebo GUI exited immediately; inspect ./drone logs")
-    say(f"[OK] Gazebo GUI started (pgid {state['pgid']})")
+        fail("Gazebo GUI exited immediately; run ./mission logs")
+    say("[OK] Gazebo GUI ready")
 
 
-def start(name):
+def start(name: str) -> None:
     ensure_dirs()
     world = validate_scenario(name)
     px4_dir = resolved_px4_dir()
@@ -449,33 +413,27 @@ def start(name):
     server = read_state(SERVER_STATE)
     if state_active(server):
         if server.get("scenario") != name:
-            fail(f"Gazebo is already running scenario {server.get('scenario')!r}; run ./drone stop first")
+            fail("another scenario is already running; use ./mission stop")
         if world_ready(name, env):
             start_gui(env)
-            say(f"[OK] managed Gazebo runtime ready: {name}")
+            say(f"[OK] Gazebo ready: {name}")
             return
         terminate_state(GUI_STATE, "Gazebo GUI")
         terminate_state(SERVER_STATE, "unhealthy Gazebo server")
 
-    # Clean up stale processes from both this implementation and the previous
-    # PX4-owned launch strategy before creating a fresh isolated world.
     terminate_state(GUI_STATE, "stale Gazebo GUI")
     cleanup_owned_orphans()
     cleanup_legacy_px4_gazebo(px4_dir)
-
     start_server(name, world, env)
     start_gui(env)
-    say(f"[OK] managed Gazebo runtime ready: {name}")
+    say(f"[OK] Gazebo ready: {name}")
 
 
-def stop():
+def stop() -> None:
     ensure_dirs()
     terminate_state(GUI_STATE, "Gazebo GUI")
     terminate_state(SERVER_STATE, "Gazebo server")
     cleanup_owned_orphans()
-
-    # This second cleanup is specifically for the black-window leak created by
-    # the older runtime where PX4 owned the Gazebo child processes.
     try:
         px4_dir = resolved_px4_dir()
     except SystemExit:
@@ -484,48 +442,19 @@ def stop():
         cleanup_legacy_px4_gazebo(px4_dir)
 
 
-def status():
+def status() -> None:
     server = read_state(SERVER_STATE)
     gui = read_state(GUI_STATE)
-    say(f"Gazebo server: {'RUNNING' if state_active(server) else 'STOPPED'}")
+    say(f"Gazebo      : {'RUNNING' if state_active(server) else 'STOPPED'}")
     if state_active(server):
-        say(f"Scenario     : {server.get('scenario', '?')}")
-        say(f"Server pgid  : {server.get('pgid')}")
-    say(f"Gazebo GUI   : {'RUNNING' if state_active(gui) else 'STOPPED'}")
-    if state_active(gui):
-        say(f"GUI pgid     : {gui.get('pgid')}")
-    say(f"GZ partition : {PARTITION}")
+        say(f"Gazebo world: {server.get('scenario', '?')}")
+    say(f"Gazebo GUI  : {'RUNNING' if state_active(gui) else 'STOPPED'}")
 
 
-def logs():
+def logs() -> None:
     for path in (SERVER_LOG, GUI_LOG):
         say(f"\n===== {path.relative_to(ROOT)} =====")
         if not path.exists():
             say("(no log yet)")
             continue
-        say("\n".join(path.read_text(errors="replace").splitlines()[-80:]))
-
-
-def main():
-    args = sys.argv[1:]
-    command = args[0] if args else "status"
-    if command == "start":
-        if len(args) != 2:
-            fail("Usage: gazebo_runtime.py start <scenario>")
-        start(args[1])
-    elif command in {"stop", "cleanup"}:
-        stop()
-    elif command == "status":
-        status()
-    elif command == "logs":
-        logs()
-    elif command == "partition":
-        print(PARTITION)
-    elif command == "owner":
-        print(OWNER_ID)
-    else:
-        fail(f"unknown command: {command}")
-
-
-if __name__ == "__main__":
-    main()
+        say("\n".join(path.read_text(encoding="utf-8", errors="replace").splitlines()[-80:]))
