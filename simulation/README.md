@@ -1,80 +1,54 @@
 # Simulation scenarios
 
-Repository-owned Gazebo worlds live under `simulation/worlds/` and are selected through `simulation/scenarios.json`.
+Repository-owned Gazebo worlds live under `simulation/worlds/` and are declared in `simulation/scenarios.json`.
 
-The repository default is `training_field`, so normal use is simply:
+Normal use goes through the single runtime entry point:
 
 ```bash
-./drone start
+./mission start
 ```
 
-List the available scenarios:
+List/select a world:
 
 ```bash
-./drone scenarios
+./mission scenario
+./mission scenario urban_block
+./mission scenario industrial_yard
+./mission scenario reset
 ```
 
-Select another scenario and then start the simulator:
+Or select and start in one command:
 
 ```bash
-./drone scenario urban_block
-./drone start
-```
-
-You can also select and start in one command:
-
-```bash
-./drone start industrial_yard
-```
-
-Return to the repository default:
-
-```bash
-./drone scenario reset
+./mission start industrial_yard
 ```
 
 Current scenarios:
 
-- `training_field` — open flight-test field with helipad, road, hangar, service building, water tower, vehicle and trees.
-- `urban_block` — roads, central launch plaza, buildings, parked vehicles, trees and street furniture.
-- `industrial_yard` — warehouses, shipping containers, storage tanks, pipe bridge, forklift, barriers and service road.
+- `training_field` — open flight-test field and default world.
+- `urban_block` — streets, buildings, parked vehicles and a central launch plaza.
+- `industrial_yard` — warehouses, containers, tanks and structured obstacle corridors.
 
-## Runtime design
+## Internal runtime design
 
-Repository-owned worlds are launched in PX4's supported **Gazebo standalone mode**. The root `./drone` command starts Gazebo itself using the absolute SDF path under this repository, waits until `/world/<scenario>/scene/info` is available, starts the Gazebo GUI, and only then starts PX4 with `PX4_GZ_STANDALONE=1` and the selected `PX4_GZ_WORLD`.
+`./mission` owns orchestration. The Gazebo helper starts the selected repository SDF in PX4-supported standalone mode, validates it with `gz sdf -k`, waits for the world service, starts the GUI, and then the internal PX4 runtime connects with `PX4_GZ_STANDALONE=1`.
 
-This separation is intentional. In normal PX4-managed mode, PX4 v1.17 constructs the world filename from its generated `PX4_GZ_WORLDS` directory. A repository-only world name would therefore be resolved inside the PX4 checkout rather than inside this repository. Standalone mode avoids that path rewrite and lets the repository own the exact world file without modifying the pinned PX4 checkout.
+Each repository clone gets its own `GZ_PARTITION`, preventing unrelated Gazebo sessions from being mistaken for this project's world. Runtime state records process IDs/process groups and only targets managed processes during shutdown.
 
-The Gazebo helper sources PX4's generated `gz_env.sh` so the simulator still receives the correct PX4 model paths, Gazebo system plugin path and PX4 server configuration. It then prepends `simulation/worlds` to `GZ_SIM_RESOURCE_PATH` for repository resources.
-
-Before startup every selected world is checked with Gazebo's own SDF validator (`gz sdf -k`). The server is started before the GUI, so a failed world does not leave a disconnected black Gazebo window pretending the simulation is ready.
-
-Each repository clone also gets an isolated `GZ_PARTITION`. PX4, Gazebo and camera discovery share that partition, preventing unrelated Gazebo sessions from being mistaken for this project's world.
-
-## Shutdown and recovery
-
-Normal shutdown:
+Shutdown is simply:
 
 ```bash
-./drone stop
+./mission stop
 ```
 
-The runtime owns the Gazebo server and GUI process groups directly. Shutdown tries SIGINT, then SIGTERM, and finally SIGKILL only for processes that the runtime owns. This prevents a stuck Gazebo GUI from surviving indefinitely.
-
-For a partially failed or stale runtime:
+For diagnostics:
 
 ```bash
-./drone cleanup
+./mission status
+./mission why
+./mission logs
 ```
 
-The cleanup path also contains a narrow compatibility recovery for Gazebo processes leaked by the older PX4-launched implementation: it only targets Gazebo processes whose working directory is inside PX4's SITL `rootfs`, rather than killing arbitrary Gazebo sessions on the machine.
+The internal Gazebo shutdown path escalates from SIGINT to SIGTERM and uses SIGKILL only for process groups it owns. It also contains narrow recovery for stale Gazebo processes left by older repository versions.
 
-Useful diagnostics:
-
-```bash
-./drone status
-./drone logs
-./drone gz-logs
-```
-
-World files use SDFormat 1.9. They preserve PX4-compatible physics timing, gravity, magnetic field, atmosphere and WGS84 spherical coordinates, while all scenario geometry and materials are repository-owned and self-contained.
+World files use SDFormat 1.9 and preserve PX4-compatible physics timing, gravity, magnetic field, atmosphere and WGS84 spherical coordinates.

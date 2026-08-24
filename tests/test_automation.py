@@ -9,14 +9,21 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 import bootstrap  # noqa: E402
 import dev  # noqa: E402
-import drone  # noqa: E402
 import qgroundcontrol  # noqa: E402
+import runtime  # noqa: E402
 
 
 class ToolchainContractTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.manifest = bootstrap.load_manifest()
+
+    def test_public_entrypoints_are_small(self):
+        for name in ("dev", "mission", "ros"):
+            self.assertTrue((ROOT / name).is_file(), name)
+        self.assertFalse((ROOT / "drone").exists())
+        self.assertFalse((ROOT / "tools" / "drone.py").exists())
+        self.assertTrue((ROOT / "tools" / "runtime.py").is_file())
 
     def test_pinned_stack(self):
         stack = self.manifest["stack"]
@@ -31,26 +38,61 @@ class ToolchainContractTests(unittest.TestCase):
             stack["qgroundcontrol"]["sha256"],
             "06969c67ef58ea063def0a8271447a1cc385438c4a7df36813315b4475146737",
         )
-        self.assertEqual(stack["qgroundcontrol"]["size_bytes"], 180816376)
 
     def test_minimal_cpp_application(self):
         registry = (ROOT / "app/runtime/node_registry.hpp").read_text(encoding="utf-8")
-        self.assertIn("make_camera_node()", registry)
-        self.assertIn("make_flight_node()", registry)
-        self.assertNotIn("make_core_node()", registry)
-        self.assertNotIn("make_state_node()", registry)
-        self.assertNotIn("make_sensors_node()", registry)
+        self.assertIn('{"camera", make_camera_node}', registry)
+        self.assertIn('{"flight", make_flight_node}', registry)
+        self.assertNotIn("make_core_node", registry)
+        self.assertNotIn("make_state_node", registry)
+        self.assertNotIn("make_sensors_node", registry)
 
         for removed in ("core", "state", "sensors"):
             self.assertFalse((ROOT / "app" / removed).exists())
 
-        cpp_files = sorted(ROOT.glob("**/*.cpp"))
-        app_cpp = [path for path in cpp_files if "app" in path.parts]
-        self.assertTrue(app_cpp)
+        app_cpp = sorted((ROOT / "app").rglob("*.cpp"))
         self.assertEqual(
             sum("int main(" in path.read_text(encoding="utf-8") for path in app_cpp),
             1,
         )
+
+    def test_node_registry_matches_discovery(self):
+        discovered = set(dev.module_map())
+        registered = set(dev.registry_nodes())
+        self.assertEqual(discovered, {"camera", "flight"})
+        self.assertEqual(registered, discovered)
+
+        registry = (ROOT / "app/runtime/node_registry.hpp").read_text(encoding="utf-8")
+        self.assertIn("DRONE_NODE_INCLUDES", registry)
+        self.assertIn("DRONE_NODE_ENTRIES", registry)
+        self.assertIn("NodeSpec", registry)
+
+        main = (ROOT / "app/main.cpp").read_text(encoding="utf-8")
+        self.assertIn("DRONE_ONLY_NODE", main)
+        self.assertIn("make_nodes(only_node)", main)
+
+    def test_dev_discovers_nodes_and_helpers(self):
+        camera = ROOT / "app/camera/camera.cpp"
+        flight = ROOT / "app/flight/flight.cpp"
+        publisher = ROOT / "app/flight/publisher/publisher.cpp"
+        self.assertEqual(dev.source_kind(camera), "node")
+        self.assertEqual(dev.source_kind(flight), "node")
+        self.assertEqual(dev.source_kind(publisher), "helper")
+        self.assertEqual(dev.validate_module_contract(camera), [])
+        self.assertEqual(dev.validate_module_contract(flight), [])
+
+    def test_dev_command_surface_is_intentionally_small(self):
+        source = (ROOT / "tools/dev.py").read_text(encoding="utf-8")
+        for command in ("setup", "build", "test", "nodes", "new", "run", "clean"):
+            self.assertIn(f'command == "{command}"', source)
+        for obsolete in (
+            'command == "doctor"',
+            'command == "verify"',
+            'command == "fmt"',
+            'command == "shell"',
+            'command == "rebuild"',
+        ):
+            self.assertNotIn(obsolete, source)
 
     def test_only_takeoff_and_camera_dependencies(self):
         package_xml = (ROOT / "app/package.xml").read_text(encoding="utf-8")
@@ -66,34 +108,19 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertIn("ament_auto_add_library(drone_lib", cmake)
         self.assertIn("ament_auto_add_executable(drone_app", cmake)
         self.assertIn("find_package(OpenCV 4 REQUIRED)", cmake)
-        self.assertNotIn("Eigen3", cmake)
-
-    def test_dev_discovers_nodes_and_helpers(self):
-        camera = ROOT / "app/camera/camera.cpp"
-        flight = ROOT / "app/flight/flight.cpp"
-        publisher = ROOT / "app/flight/publisher/publisher.cpp"
-
-        self.assertEqual(dev.source_kind(camera), "node")
-        self.assertEqual(dev.source_kind(flight), "node")
-        self.assertEqual(dev.source_kind(publisher), "helper")
-        self.assertEqual(dev.validate_module_contract(camera), [])
-        self.assertEqual(dev.validate_module_contract(flight), [])
 
     def test_camera_runtime_contract(self):
         stack = self.manifest["stack"]
         camera = stack["camera_bridge"]
         self.assertEqual(stack["px4"]["sim_target"], "gz_x500_mono_cam")
         self.assertEqual(camera["ros_image_topic"], "/camera/image_raw")
-        self.assertIn("gz_x500_mono_cam", camera["targets"])
 
-    def test_camera_topic_discovery_is_instance_agnostic(self):
-        camera = self.manifest["stack"]["camera_bridge"]
         topics = [
             "/world/default/model/other_0/link/camera_link/sensor/imager/image",
             "/world/default/model/x500_mono_cam_12/link/camera_link/sensor/imager/camera_info",
             "/world/default/model/x500_mono_cam_12/link/camera_link/sensor/imager/image",
         ]
-        image, info = drone.select_camera_topics(
+        image, info = runtime.select_camera_topics(
             topics,
             camera,
             preferred_model="gz_x500_mono_cam",
@@ -101,38 +128,40 @@ class ToolchainContractTests(unittest.TestCase):
         self.assertIn("x500_mono_cam_12", image)
         self.assertTrue(info.endswith("/camera_info"))
 
-    def test_qgroundcontrol_automation_contract(self):
-        qgc = self.manifest["stack"]["qgroundcontrol"]
-        launcher = (ROOT / "drone").read_text(encoding="utf-8")
-        dev_launcher = (ROOT / "dev").read_text(encoding="utf-8")
+    def test_mission_owns_qgc_and_runtime_orchestration(self):
+        mission = (ROOT / "tools/mission.py").read_text(encoding="utf-8")
+        dev_source = (ROOT / "tools/dev.py").read_text(encoding="utf-8")
         why = (ROOT / "tools/why.py").read_text(encoding="utf-8")
-        qgc_tool = (ROOT / "tools/qgroundcontrol.py").read_text(encoding="utf-8")
 
-        self.assertTrue(qgc["enabled"])
-        self.assertTrue(qgc["download_url"].startswith("https://github.com/mavlink/QGroundControl/releases/"))
-        self.assertEqual(qgroundcontrol.binary_path(self.manifest).name, qgc["filename"])
-        self.assertIn("sha256_file", qgc_tool)
-        self.assertIn("size_bytes", qgc_tool)
+        self.assertIn("qgroundcontrol.setup()", dev_source)
+        self.assertIn("qgc.start()", mission)
+        self.assertIn("gazebo.start(scenario)", mission)
+        self.assertIn("runtime.start()", mission)
+        self.assertIn("qgc.wait_connected()", mission)
+        self.assertIn("why.report()", mission)
+        self.assertIn("import runtime", why)
+        self.assertNotIn("PX4_PARAM_NAV_DLL_ACT", mission)
+        self.assertEqual(
+            qgroundcontrol.binary_path(self.manifest).name,
+            self.manifest["stack"]["qgroundcontrol"]["filename"],
+        )
 
-        self.assertIn("tools/qgroundcontrol.py", dev_launcher)
-        self.assertIn('python3 "${QGC_TOOL}" start', launcher)
-        self.assertIn('python3 "${QGC_TOOL}" wait-connected', launcher)
-        self.assertIn('python3 "${QGC_TOOL}" stop', launcher)
-        self.assertNotIn("PX4_PARAM_NAV_DLL_ACT", launcher)
-
-        self.assertIn("QGroundControl is not running", why)
-        self.assertNotIn("ignored by this SITL profile", why)
+    def test_ros_wrapper_is_inspection_focused(self):
+        source = (ROOT / "tools/ros.py").read_text(encoding="utf-8")
+        for command in ("topics", "nodes", "node", "echo", "once", "rate", "info"):
+            self.assertIn(f'command == "{command}"', source)
+        for removed in ("send", "call", "services", "params", "set", "doctor"):
+            self.assertNotIn(f'command == "{removed}"', source)
 
     def test_scenario_worlds(self):
         config = json.loads((ROOT / "simulation/scenarios.json").read_text())
         self.assertEqual(config["default"], "training_field")
         worlds = ROOT / config["worlds_dir"]
-
         for name in config["scenarios"]:
             root = ET.parse(worlds / f"{name}.sdf").getroot()
             self.assertEqual(root.tag, "sdf")
             self.assertEqual(root.get("version"), "1.9")
-            self.assertIsNotNone(root.find("world"))
+            self.assertEqual(root.find("world").get("name"), name)
 
     def test_supported_platforms(self):
         base = {

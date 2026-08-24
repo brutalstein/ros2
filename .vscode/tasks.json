@@ -2,7 +2,7 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Workspace: Setup / Repair",
+      "label": "Dev: Setup",
       "type": "shell",
       "command": "./dev setup",
       "problemMatcher": []
@@ -10,32 +10,39 @@
     {
       "label": "Dev: Build",
       "type": "shell",
-      "command": "./dev b",
+      "command": "./dev build",
       "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": "$gcc"
+    },
+    {
+      "label": "Dev: Test",
+      "type": "shell",
+      "command": "./dev test",
+      "group": "test",
       "problemMatcher": "$gcc"
     },
     {
       "label": "Dev: Run Node",
       "type": "shell",
-      "command": "./dev r ${input:node}",
+      "command": "./dev run ${input:node}",
       "problemMatcher": "$gcc"
     },
     {
-      "label": "Dev: Verify Toolchain",
+      "label": "Mission: Start",
       "type": "shell",
-      "command": "./dev verify",
+      "command": "./mission start",
       "problemMatcher": []
     },
     {
-      "label": "Drone: Start Simulation",
+      "label": "Mission: Why",
       "type": "shell",
-      "command": "./drone start",
+      "command": "./mission why",
       "problemMatcher": []
     },
     {
-      "label": "Drone: Stop Simulation",
+      "label": "Mission: Stop",
       "type": "shell",
-      "command": "./drone stop",
+      "command": "./mission stop",
       "problemMatcher": []
     },
     {
@@ -49,7 +56,7 @@
     {
       "id": "node",
       "type": "promptString",
-      "description": "Node executable name"
+      "description": "Registered node name (see ./dev nodes)"
     }
   ]
 }
