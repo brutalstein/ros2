@@ -326,6 +326,6 @@ void OffboardController::fail_takeoff(const char *reason)
     phase_ = Phase::FAILED;
     RCLCPP_ERROR(
         node_.get_logger(),
-        "takeoff failed | %s | run ./drone why",
+        "takeoff failed | %s | run ./mission why",
         reason);
 }
