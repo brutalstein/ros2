@@ -22,11 +22,12 @@ case "${1:-}" in
   current-scenario)
     exec python3 "${SCENARIO_TOOL}" current
     ;;
+  why)
+    exec python3 "${ROOT}/tools/why.py"
+    ;;
 esac
 
 # Convenience: a scenario name can be passed directly to start.
-# Existing vehicle aliases such as `camera`, `plain`, `down` and `depth`
-# continue to be forwarded to tools/drone.py unchanged.
 if [[ "${1:-}" == "start" && -n "${2:-}" ]] && python3 "${SCENARIO_TOOL}" is-known "$2" >/dev/null 2>&1; then
   python3 "${SCENARIO_TOOL}" select "$2" >/dev/null
   set -- start "${@:3}"
@@ -39,14 +40,15 @@ export GZ_PARTITION="$(python3 "${GAZEBO_TOOL}" partition)"
 export DRONE_RUNTIME_OWNER="$(python3 "${GAZEBO_TOOL}" owner)"
 export GZ_SIM_RESOURCE_PATH="${WORLDS_DIR}${GZ_SIM_RESOURCE_PATH:+:${GZ_SIM_RESOURCE_PATH}}"
 
+# This project has no GCS. Disable only PX4's GCS-loss action for SITL; all
+# estimator, sensor, position, failsafe and normal arming checks remain active.
+export PX4_PARAM_NAV_DLL_ACT="${PX4_PARAM_NAV_DLL_ACT:-0}"
+
 case "${1:-}" in
   start)
     echo "[INFO] scenario: ${PX4_GZ_WORLD}"
     echo "[INFO] Gazebo mode: managed standalone"
 
-    # Start and validate the repository-owned Gazebo world first. PX4 is then
-    # connected in its officially supported standalone mode, which avoids PX4
-    # rewriting custom world names into its own Tools/simulation/gz/worlds path.
     python3 "${GAZEBO_TOOL}" start "${SELECTED_SCENARIO}"
 
     set +e
@@ -64,8 +66,6 @@ case "${1:-}" in
     ;;
 
   stop)
-    # Stop PX4 / bridge / DDS first, then the GUI and server. The Gazebo helper
-    # also recovers orphaned processes leaked by the previous launch strategy.
     set +e
     python3 "${ROOT}/tools/drone.py" stop
     core_code=$?
@@ -77,7 +77,6 @@ case "${1:-}" in
     ;;
 
   cleanup)
-    # Explicit recovery command for a partially failed or stale runtime.
     python3 "${ROOT}/tools/drone.py" stop || true
     exec python3 "${GAZEBO_TOOL}" cleanup
     ;;
@@ -103,8 +102,6 @@ case "${1:-}" in
     ;;
 
   *)
-    # Internal _px4-run / _px4-background invocations land here too. They inherit
-    # PX4_GZ_STANDALONE, the selected world name and this repo's Gazebo partition.
     exec python3 "${ROOT}/tools/drone.py" "$@"
     ;;
 esac

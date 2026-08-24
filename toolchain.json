@@ -18,17 +18,7 @@
         "ros-jazzy-ros-gz",
         "ros-jazzy-sensor-msgs",
         "ros-jazzy-cv-bridge",
-        "ros-jazzy-image-transport",
-        "ros-jazzy-image-geometry",
-        "ros-jazzy-message-filters",
-        "ros-jazzy-vision-msgs",
-        "ros-jazzy-geometry-msgs",
-        "ros-jazzy-nav-msgs",
-        "ros-jazzy-tf2-ros",
-        "ros-jazzy-tf2-geometry-msgs",
-        "ros-jazzy-tf2-eigen",
-        "libopencv-dev",
-        "libeigen3-dev"
+        "libopencv-dev"
       ]
     },
     "px4": {
@@ -61,7 +51,7 @@
       "gazebo_info_suffix": "/link/camera_link/sensor/imager/camera_info",
       "ros_image_topic": "/camera/image_raw",
       "ros_info_topic": "/camera/camera_info",
-      "bridge_camera_info": true,
+      "bridge_camera_info": false,
       "startup_timeout_seconds": 30,
       "bridge_timeout_seconds": 12
     }
