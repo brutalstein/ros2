@@ -12,7 +12,7 @@ jobs:
       - name: Python syntax
         run: python3 -m py_compile tools/*.py
       - name: Shell syntax
-        run: bash -n dev ros drone
+        run: bash -n dev ros drone mission
       - name: Deterministic resolver tests
         run: python3 -m unittest discover -s tests -v
       - name: Manifest parse
